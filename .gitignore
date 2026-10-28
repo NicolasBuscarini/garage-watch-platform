@@ -1,0 +1,13 @@
+.env
+.env.*
+!.env.example
+bin/
+obj/
+.vs/
+.idea/
+TestResults/
+coverage/
+data/
+logs/
+*.user
+*.suo

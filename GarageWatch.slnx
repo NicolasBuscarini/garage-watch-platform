@@ -1,0 +1,7 @@
+<Solution>
+  <Project Path="src/GarageWatch.Domain/GarageWatch.Domain.csproj" />
+  <Project Path="src/GarageWatch.Application/GarageWatch.Application.csproj" />
+  <Project Path="src/GarageWatch.Infrastructure/GarageWatch.Infrastructure.csproj" />
+  <Project Path="src/GarageWatch.Api/GarageWatch.Api.csproj" />
+  <Project Path="tests/GarageWatch.Api.Tests/GarageWatch.Api.Tests.csproj" />
+</Solution>

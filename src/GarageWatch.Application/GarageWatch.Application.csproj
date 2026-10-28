@@ -1,0 +1,6 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="../GarageWatch.Domain/GarageWatch.Domain.csproj" />
+    <PackageReference Include="MediatR" />
+  </ItemGroup>
+</Project>

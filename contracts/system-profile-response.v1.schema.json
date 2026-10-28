@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://garagem-ia.local/contracts/system-profile-response.v1.schema.json",
+  "title": "T01 development system profile response v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "correlationId",
+    "serviceName",
+    "environment",
+    "applicationVersion"
+  ],
+  "properties": {
+    "schemaVersion": { "type": "string", "const": "1.0" },
+    "correlationId": { "type": "string", "format": "uuid" },
+    "serviceName": { "type": "string", "minLength": 1 },
+    "environment": { "type": "string", "minLength": 1 },
+    "applicationVersion": { "type": "string", "minLength": 1 }
+  }
+}
