@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://garage-watch.local/contracts/capture-gap.v1.schema.json",
+  "title": "Capture gap v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "gapId", "cameraId", "previousStreamEpoch", "occurredAt", "reasonCode", "retryAttempt"],
+  "properties": {
+    "schemaVersion": { "const": "1.0" },
+    "gapId": { "type": "string", "pattern": "^[a-f0-9]{32}$" },
+    "cameraId": { "type": "string", "minLength": 1, "maxLength": 64 },
+    "previousStreamEpoch": { "type": ["string", "null"], "format": "uuid" },
+    "occurredAt": { "type": "string", "format": "date-time" },
+    "reasonCode": { "enum": ["capture_source_unavailable"] },
+    "retryAttempt": { "type": "integer", "minimum": 1, "maximum": 6 }
+  }
+}

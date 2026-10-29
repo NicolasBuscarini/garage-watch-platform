@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http.Json;
 using System.Text.Json;
 using GarageWatch.Api.Correlation;
 using Xunit;
@@ -79,19 +80,79 @@ public sealed class SystemProfileEndpointTests
     {
         using var factory = new ApiFactory();
         using var client = factory.CreateClient();
+        await AuthenticateAsync(client);
 
-        foreach (var (path, expected) in new[]
-                 {
-                     ("/health/live", "live"),
-                     ("/health/ready", "ready")
-                 })
+        using (var live = await client.GetAsync("/health/live"))
+        using (var liveBody = JsonDocument.Parse(await live.Content.ReadAsStringAsync()))
         {
-            using var response = await client.GetAsync(path);
-            using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+            Assert.Equal(HttpStatusCode.OK, live.StatusCode);
+            Assert.Equal("live", liveBody.RootElement.GetProperty("status").GetString());
+            Assert.Single(liveBody.RootElement.EnumerateObject());
+        }
 
-            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-            Assert.Equal(expected, body.RootElement.GetProperty("status").GetString());
-            Assert.Single(body.RootElement.EnumerateObject());
+        using var response = await WaitForReadyAsync(client, TimeSpan.FromSeconds(5));
+        using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("ready", body.RootElement.GetProperty("status").GetString());
+        var capture = body.RootElement.GetProperty("capture");
+        Assert.Equal("synthetic-segment-source", capture.GetProperty("adapter").GetString());
+        Assert.Equal("1.0", capture.GetProperty("adapterVersion").GetString());
+        Assert.Contains("synthetic-segments", capture.GetProperty("capabilities").EnumerateArray()
+            .Select(value => value.GetString()));
+        Assert.Equal("capturing", capture.GetProperty("state").GetString());
+        Assert.DoesNotContain("RTSP", body.RootElement.ToString(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static async Task AuthenticateAsync(HttpClient client)
+    {
+        using var response = await client.PostAsJsonAsync("/api/v1/auth/login",
+            new { username = "contract-user", password = "contract-password-12345" });
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+        client.DefaultRequestHeaders.Add("Cookie", response.Headers.GetValues("Set-Cookie").Single().Split(';', 2)[0]);
+    }
+
+    private static async Task<HttpResponseMessage> WaitForReadyAsync(HttpClient client, TimeSpan timeout)
+    {
+        var deadline = DateTime.UtcNow + timeout;
+        HttpResponseMessage? response = null;
+        while (DateTime.UtcNow < deadline)
+        {
+            response?.Dispose();
+            response = await client.GetAsync("/health/ready");
+            if (response.StatusCode == HttpStatusCode.OK) return response;
+            await Task.Delay(50);
+        }
+        return response ?? await client.GetAsync("/health/ready");
+    }
+
+    [Fact]
+    public async Task Capture_failure_degrades_readiness_without_affecting_liveness()
+    {
+        using var factory = new ApiFactory(captureAdapter: new UnavailableCaptureAdapter());
+        using var client = factory.CreateClient();
+        await AuthenticateAsync(client);
+        using var live = await client.GetAsync("/health/live");
+        Assert.Equal(HttpStatusCode.OK, live.StatusCode);
+
+        HttpResponseMessage? readiness = null;
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(3);
+        while (DateTime.UtcNow < deadline)
+        {
+            readiness?.Dispose();
+            readiness = await client.GetAsync("/health/ready");
+            if (readiness.StatusCode == HttpStatusCode.ServiceUnavailable
+                && (await readiness.Content.ReadAsStringAsync()).Contains("\"state\":\"reconnecting\"", StringComparison.Ordinal)) break;
+            await Task.Delay(25);
+        }
+
+        Assert.NotNull(readiness);
+        using (readiness)
+        using (var body = JsonDocument.Parse(await readiness.Content.ReadAsStringAsync()))
+        {
+            Assert.Equal(HttpStatusCode.ServiceUnavailable, readiness.StatusCode);
+            Assert.Equal("degraded", body.RootElement.GetProperty("status").GetString());
+            Assert.Equal("reconnecting", body.RootElement.GetProperty("capture").GetProperty("state").GetString());
+            Assert.Equal("capture_source_unavailable", body.RootElement.GetProperty("capture").GetProperty("lastErrorCode").GetString());
         }
     }
 

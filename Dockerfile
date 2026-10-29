@@ -2,6 +2,10 @@ FROM mcr.microsoft.com/dotnet/sdk:10.0.403@sha256:de4fe90a98845d75910b9769662465
 
 ARG APP_UID=1000
 ARG APP_GID=1000
+USER root
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ffmpeg=7:6.1.1-3ubuntu5 \
+    && rm -rf /var/lib/apt/lists/*
 WORKDIR /workspace
 ENV DOTNET_CLI_TELEMETRY_OPTOUT=1 \
     DOTNET_NOLOGO=true \

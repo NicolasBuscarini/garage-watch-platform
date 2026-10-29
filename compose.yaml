@@ -11,11 +11,25 @@ services:
     working_dir: /workspace
     volumes:
       - .:/workspace
+      - ./data:/data
     environment:
       ASPNETCORE_ENVIRONMENT: Development
       ASPNETCORE_URLS: http://0.0.0.0:8080
       OTEL_EXPORTER_OTLP_ENDPOINT: "${OTEL_EXPORTER_OTLP_ENDPOINT:-}"
       OTEL_EXPORTER_OTLP_HEADERS: "${OTEL_EXPORTER_OTLP_HEADERS:-}"
+      CAPTURE_PROFILE: "${CAPTURE_PROFILE:-synthetic}"
+      CAPTURE_AUDIO_ENABLED: "${CAPTURE_AUDIO_ENABLED:-false}"
+      CAPTURE_CAMERA_ID: "${CAPTURE_CAMERA_ID:-garage-01}"
+      CAPTURE_SPOOL_DIRECTORY: /data/capture
+      CAPTURE_SEGMENT_SECONDS: "${CAPTURE_SEGMENT_SECONDS:-5}"
+      CAPTURE_MAX_SEGMENTS: "${CAPTURE_MAX_SEGMENTS:-120}"
+      CAPTURE_MAX_SEGMENT_BYTES: "${CAPTURE_MAX_SEGMENT_BYTES:-67108864}"
+      CAPTURE_RTSP_URL: "${CAPTURE_RTSP_URL:-}"
+      CAPTURE_FFMPEG_PATH: "${CAPTURE_FFMPEG_PATH:-ffmpeg}"
+      CAPTURE_FFPROBE_PATH: "${CAPTURE_FFPROBE_PATH:-ffprobe}"
+      AUTH_USERNAME: "${AUTH_USERNAME:-}"
+      AUTH_PASSWORD: "${AUTH_PASSWORD:-}"
+      AUTH_ROLE: "${AUTH_ROLE:-Viewer}"
     ports:
       - "127.0.0.1:${APP_PORT:-8081}:8080"
     tmpfs:
@@ -51,6 +65,12 @@ services:
       HOME: /tmp
       OTEL_EXPORTER_OTLP_ENDPOINT: "${OTEL_EXPORTER_OTLP_ENDPOINT:-}"
       OTEL_EXPORTER_OTLP_HEADERS: "${OTEL_EXPORTER_OTLP_HEADERS:-}"
+      CAPTURE_PROFILE: synthetic
+      CAPTURE_CAMERA_ID: capture-test
+      CAPTURE_SPOOL_DIRECTORY: /tmp/capture
+      CAPTURE_SEGMENT_SECONDS: "1"
+      CAPTURE_MAX_SEGMENTS: "4"
+      CAPTURE_MAX_SEGMENT_BYTES: "1048576"
     tmpfs:
       - /tmp:size=512m,mode=1777
     security_opt:
@@ -63,3 +83,108 @@ services:
       - GarageWatch.slnx
       - --configuration
       - Release
+
+  api-camera-integration:
+    extends:
+      service: api
+    profiles: [camera-integration]
+    ports: !override
+      - "127.0.0.1:${RTSP_APP_PORT:-8084}:8080"
+    environment:
+      CAPTURE_PROFILE: ffmpeg-rtsp
+      CAPTURE_AUDIO_ENABLED: "true"
+      CAPTURE_CAMERA_ID: "${CAPTURE_CAMERA_ID:-garage-01}"
+      CAPTURE_RTSP_URL: "${CAPTURE_RTSP_URL:-rtsp://neolink:8554/garage/mainStream}"
+    networks:
+      - default
+      - rtsp_lab
+
+  rtsp-test-server:
+    image: bluenviron/mediamtx:1.12.3@sha256:3634a1eed1288b93e8d22ed74694eae96d483fcf676cac5d0c91830ad1b86b3d
+    profiles: [rtsp-contract]
+    expose:
+      - "8554"
+
+  rtsp-test-publisher:
+    image: garage-watch-platform-dev
+    build:
+      context: .
+      args:
+        APP_UID: "${APP_UID:-1000}"
+        APP_GID: "${APP_GID:-1000}"
+    profiles: [rtsp-contract]
+    init: true
+    user: "${APP_UID:-1000}:${APP_GID:-1000}"
+    depends_on:
+      - rtsp-test-server
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    command:
+      - bash
+      - -lc
+      - >-
+        while true; do
+        ffmpeg -nostdin -hide_banner -loglevel error -re -f lavfi -i testsrc=size=640x360:rate=15
+        -f lavfi -i sine=frequency=1000:sample_rate=16000 -map 0:v:0 -map 1:a:0
+        -c:v libx264 -preset ultrafast -tune zerolatency -profile:v baseline -level:v 3.0 -pix_fmt yuv420p -g 15
+        -c:a aac -b:a 64k -ar 16000 -ac 1
+        -f rtsp -rtsp_transport tcp rtsp://rtsp-test-server:8554/garage;
+        sleep 1;
+        done
+
+  api-rtsp-contract:
+    image: garage-watch-platform-dev
+    build:
+      context: .
+      args:
+        APP_UID: "${APP_UID:-1000}"
+        APP_GID: "${APP_GID:-1000}"
+    profiles: [rtsp-contract]
+    init: true
+    user: "${APP_UID:-1000}:${APP_GID:-1000}"
+    working_dir: /workspace
+    depends_on:
+      - rtsp-test-publisher
+    volumes:
+      - .:/workspace
+      - ./data:/data
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ASPNETCORE_URLS: http://0.0.0.0:8080
+      OTEL_EXPORTER_OTLP_ENDPOINT: ""
+      OTEL_EXPORTER_OTLP_HEADERS: ""
+      CAPTURE_PROFILE: ffmpeg-rtsp
+      CAPTURE_AUDIO_ENABLED: "true"
+      CAPTURE_CAMERA_ID: rtsp-contract
+      CAPTURE_SPOOL_DIRECTORY: "/data/rtsp-contract-${RTSP_CONTRACT_RUN_ID:-manual}"
+      CAPTURE_SEGMENT_SECONDS: "2"
+      CAPTURE_MAX_SEGMENTS: "8"
+      CAPTURE_MAX_SEGMENT_BYTES: "16777216"
+      CAPTURE_RTSP_URL: rtsp://rtsp-test-server:8554/garage
+      CAPTURE_FFMPEG_PATH: ffmpeg
+      CAPTURE_FFPROBE_PATH: ffprobe
+      AUTH_USERNAME: "${AUTH_USERNAME:-}"
+      AUTH_PASSWORD: "${AUTH_PASSWORD:-}"
+      AUTH_ROLE: "${AUTH_ROLE:-Viewer}"
+    ports:
+      - "127.0.0.1:${RTSP_CONTRACT_PORT:-8082}:8080"
+    tmpfs:
+      - /tmp:size=128m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    command:
+      - dotnet
+      - run
+      - --project
+      - src/GarageWatch.Api/GarageWatch.Api.csproj
+      - --urls
+      - http://0.0.0.0:8080
+
+networks:
+  rtsp_lab:
+    name: garage-watch-rtsp-lab
+    external: true

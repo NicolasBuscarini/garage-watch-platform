@@ -8,16 +8,18 @@ O projeto começa como fundação executável de serviço .NET 10, com limites d
 
 ## Desenvolvimento
 
-Use Docker Compose para compilar, executar e testar. Configure `.env` local a partir de `.env.example`, depois execute:
+Use Docker Compose para compilar, executar e testar. Copie `.env.example` para `.env` e troque `AUTH_PASSWORD` por uma senha local exclusiva (mínimo 6 caracteres) antes de iniciar. Esse mínimo reduz a segurança; mantenha o host em loopback e não reutilize a senha. `AUTH_ROLE` seleciona `Administrator` ou `Viewer`; não há cadastro de usuários. Depois execute:
 
 ```bash
 docker compose build
 docker compose run --rm api dotnet restore GarageWatch.slnx --locked-mode
 docker compose --profile test run --rm test
+docker compose --profile rtsp-contract config --quiet
+bash scripts/verify-rtsp-contract.sh
 docker compose up --build
 ```
 
-O serviço fica somente em `127.0.0.1:${APP_PORT}`; liveness, readiness e perfil local estão em `/health/live`, `/health/ready` e `/api/v1/system-profile`. T01-O adiciona métricas e traces OpenTelemetry; envio ao coletor é opcional via `OTEL_EXPORTER_OTLP_ENDPOINT` em `.env`. Sem endpoint, não há backend, retenção ou dashboard. Os lockfiles `packages.lock.json` estão versionados; restore usa modo travado. Para atualizar dependências, altere a versão central e regenere/revise os lockfiles antes de commit. Para parar, `docker compose down` (não há volume de dados). As decisões, limites e conteúdo estão em `docs/architecture.md`, `docs/configuration.md`, `docs/dependencies.md` e `contracts/`. Nunca use este repositório para armazenar vídeo pessoal ou segredos.
+O serviço fica somente em `127.0.0.1:${APP_PORT}`. O painel em `/` usa cookie HttpOnly/SameSite Strict; login e sessão são locais/dev-only, sem banco, e cookies são invalidados ao reiniciar o host. `/health/live` permanece mínimo e público no loopback; `/health/ready`, câmeras e playlist/segmentos live exigem sessão. O gateway fornece HLS dos segmentos recentes do spool T02 sem copiar mídia para outro armazenamento. O player usa HLS.js 1.7.3 local (sem CDN), envia cookie same-origin nas requisições HLS, usa buffer limitado e marca descontinuidades entre epochs; HLS nativo permanece fallback. O usuário inicia reprodução com áudio, pois autoplay sonoro pode ser bloqueado. Compatibilidade e latência CT02 ainda não foram validadas em dispositivos reais. A configuração de papel vale para uma conta local, não é gestão de identidade multiusuário nem autorização de produção. T01-O adiciona métricas e traces OpenTelemetry; envio ao coletor é opcional via `OTEL_EXPORTER_OTLP_ENDPOINT` em `.env`. T02 usa captura sintética por padrão; `verify-rtsp-contract.sh` testa FFmpeg com MediaMTX/H.264 e AAC sintéticos, sem validar câmera/hardware. O perfil opcional `camera-integration` consome vídeo H.264 e áudio AAC do main stream pelo Neolink via rede Docker externa interna `garage-watch-rtsp-lab`, com spool local e painel ainda loopback; veja `docs/capture.md`. Os lockfiles `packages.lock.json` são travados. Para parar, `docker compose down` (dados locais ficam em `./data`). Leia também `docs/architecture.md`, `docs/configuration.md`, `docs/capture.md`, `docs/dependencies.md` e `contracts/`. Nunca use este repositório para armazenar vídeo pessoal ou segredos.
 
 ## Licença
 

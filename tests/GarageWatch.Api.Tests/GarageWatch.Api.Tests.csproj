@@ -16,5 +16,7 @@
   <ItemGroup>
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <None Include="../../contracts/system-profile-response.v1.schema.json" Link="contracts/system-profile-response.v1.schema.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../../contracts/capture-segment-manifest.v1.schema.json" Link="contracts/capture-segment-manifest.v1.schema.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../../contracts/capture-gap.v1.schema.json" Link="contracts/capture-gap.v1.schema.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

@@ -72,6 +72,7 @@ public static class ObservabilityConfiguration
             .WithMetrics(metrics =>
             {
                 metrics.AddMeter(PlatformTelemetry.MeterName);
+                metrics.AddMeter("GarageWatch.Capture");
                 metrics.AddMeter("Microsoft.AspNetCore.Hosting", "Microsoft.AspNetCore.Server.Kestrel");
                 metrics.AddRuntimeInstrumentation();
                 if (endpoint is not null)

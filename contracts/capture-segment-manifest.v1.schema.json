@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://garage-watch.local/contracts/capture-segment-manifest.v1.schema.json",
+  "title": "Capture segment manifest v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "segmentId", "cameraId", "streamEpoch", "startedAt", "endedAt", "fileName", "sizeBytes", "sha256"],
+  "properties": {
+    "schemaVersion": { "const": "1.0" },
+    "segmentId": { "type": "string", "pattern": "^[a-f0-9]{32}$" },
+    "cameraId": { "type": "string", "minLength": 1, "maxLength": 64 },
+    "streamEpoch": { "type": "string", "format": "uuid" },
+    "startedAt": { "type": "string", "format": "date-time" },
+    "endedAt": { "type": "string", "format": "date-time" },
+    "fileName": { "type": "string", "pattern": "^[a-f0-9]{32}\\.ts$" },
+    "sizeBytes": { "type": "integer", "minimum": 1 },
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  }
+}
