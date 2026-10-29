@@ -50,17 +50,59 @@ public sealed class AuthenticationAndLiveTests
         var html = await panel.Content.ReadAsStringAsync();
         Assert.Contains("Painel da garagem", html, StringComparison.Ordinal);
         Assert.Contains("/vendor/hls.min.js", html, StringComparison.Ordinal);
-        Assert.Contains("/favicon.svg", html, StringComparison.Ordinal);
-        Assert.Contains("<video id=\"live\" controls playsinline>", html, StringComparison.Ordinal);
+        Assert.Contains("/vendor/bootstrap.min.css", html, StringComparison.Ordinal);
+        Assert.Contains("/app.css", html, StringComparison.Ordinal);
+        Assert.DoesNotContain("cdn.", html, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("for=\"username\"", html, StringComparison.Ordinal);
+        Assert.Contains("for=\"password\"", html, StringComparison.Ordinal);
+        Assert.Contains("aria-label=\"Vídeo ao vivo da câmera\"", html, StringComparison.Ordinal);
+        Assert.Contains("aria-label=\"Servidores e conexões\"", html, StringComparison.Ordinal);
+        Assert.Contains("Não configurados", html, StringComparison.Ordinal);
+        Assert.Contains("id=\"api-health\"", html, StringComparison.Ordinal);
+        Assert.Contains("id=\"capture-health\"", html, StringComparison.Ordinal);
+        Assert.Contains("id=\"gateway-health\"", html, StringComparison.Ordinal);
+        Assert.Contains("id=\"gateway-health\"", html, StringComparison.Ordinal);
+        Assert.Contains("id=\"client-count\"", html, StringComparison.Ordinal);
+        Assert.Contains("aria-label=\"Clientes conectados\"", html, StringComparison.Ordinal);
+        Assert.Contains("id=\"player-toggle\"", html, StringComparison.Ordinal);
+        Assert.Contains("id=\"player-sync\"", html, StringComparison.Ordinal);
+        var cameraSection = html.IndexOf("CÂMERA ATIVA", StringComparison.Ordinal);
+        var monitorSection = html.IndexOf("MONITORAMENTO", StringComparison.Ordinal);
+        var operationsSection = html.IndexOf("Saúde do sistema", StringComparison.Ordinal);
+        Assert.True(cameraSection >= 0 && cameraSection < monitorSection && monitorSection < operationsSection);
+        Assert.Contains("<video id=\"live\" class=\"live-video\" controls playsinline preload=\"none\"", html, StringComparison.Ordinal);
         Assert.DoesNotContain("autoplay muted", html, StringComparison.Ordinal);
+        var bootstrapCss = await anonymous.GetByteArrayAsync("/vendor/bootstrap.min.css");
+        Assert.Equal("a7695108838ea4708a547d2d07fb37c4889eb663fb18c3761677ed6a50c4fe41",
+            Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bootstrapCss)).ToLowerInvariant());
+        var bootstrapText = System.Text.Encoding.UTF8.GetString(bootstrapCss);
+        Assert.Contains(".container", bootstrapText, StringComparison.Ordinal);
+        Assert.DoesNotContain("sourceMappingURL", bootstrapText, StringComparison.Ordinal);
+        var appCss = await anonymous.GetStringAsync("/app.css");
+        Assert.Contains(":focus-visible", appCss, StringComparison.Ordinal);
+        Assert.Contains("prefers-reduced-motion", appCss, StringComparison.Ordinal);
+        Assert.Contains("@media (max-width: 575.98px)", appCss, StringComparison.Ordinal);
         using var favicon = await anonymous.GetAsync("/favicon.svg");
         Assert.Equal(HttpStatusCode.OK, favicon.StatusCode);
         var appScript = await anonymous.GetStringAsync("/app.js");
         Assert.Contains("Falha HLS (", appScript, StringComparison.Ordinal);
-        Assert.Contains("maxBufferLength:12", appScript, StringComparison.Ordinal);
-        Assert.Contains("maxMaxBufferLength:18", appScript, StringComparison.Ordinal);
-        Assert.Contains("xhr.withCredentials=true", appScript, StringComparison.Ordinal);
-        Assert.Contains("Clique em reproduzir para iniciar áudio e vídeo.", appScript, StringComparison.Ordinal);
+        Assert.Contains("maxBufferLength: 12", appScript, StringComparison.Ordinal);
+        Assert.Contains("maxMaxBufferLength: 18", appScript, StringComparison.Ordinal);
+        Assert.Contains("xhr.withCredentials = true", appScript, StringComparison.Ordinal);
+        Assert.Contains("/health/live", appScript, StringComparison.Ordinal);
+        Assert.Contains("/health/ready", appScript, StringComparison.Ordinal);
+        Assert.Contains("/api/v1/system-profile", appScript, StringComparison.Ordinal);
+        Assert.Contains("/api/v1/system-profile", appScript, StringComparison.Ordinal);
+        Assert.Contains("/api/v1/clients/presence", appScript, StringComparison.Ordinal);
+        Assert.Contains("crypto.randomUUID()", appScript, StringComparison.Ordinal);
+        Assert.Contains("setInterval(() => void sendClientHeartbeat(), 10000)", appScript, StringComparison.Ordinal);
+        Assert.Contains("hls.liveSyncPosition", appScript, StringComparison.Ordinal);
+        Assert.Contains("video.seekable.end(range)", appScript, StringComparison.Ordinal);
+        Assert.Contains("video.currentTime = target", appScript, StringComparison.Ordinal);
+        Assert.Contains("camera.liveUrl", appScript, StringComparison.Ordinal);
+        Assert.Contains("delete video.dataset.url", appScript, StringComparison.Ordinal);
+        Assert.Contains("capture_source_unavailable", appScript, StringComparison.Ordinal);
+        Assert.Contains("Clique em reproduzir para iniciar áudio e vídeo.", html, StringComparison.Ordinal);
         var player = await anonymous.GetByteArrayAsync("/vendor/hls.min.js");
         Assert.Equal("de49f5a3084f73c9e3e4e2999d6e789f8ea5aff0120d295631ecb9bf1480b3ea",
             Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(player)).ToLowerInvariant());
@@ -91,6 +133,35 @@ public sealed class AuthenticationAndLiveTests
         Assert.DoesNotContain("rtsp", body, StringComparison.OrdinalIgnoreCase);
         using var cameraJson = System.Text.Json.JsonDocument.Parse(body);
         var initialSegmentCount = cameraJson.RootElement[0].GetProperty("segments").GetInt64();
+
+        using var liveness = await session.GetAsync("/health/live");
+        Assert.Equal(HttpStatusCode.OK, liveness.StatusCode);
+        HttpResponseMessage? readiness = null;
+        var readinessDeadline = DateTime.UtcNow.AddSeconds(5);
+        while (DateTime.UtcNow < readinessDeadline)
+        {
+            readiness?.Dispose();
+            readiness = await session.GetAsync("/health/ready");
+            if (readiness.StatusCode == HttpStatusCode.OK) break;
+            await Task.Delay(50);
+        }
+        Assert.NotNull(readiness);
+        using (readiness)
+        {
+            Assert.Equal(HttpStatusCode.OK, readiness.StatusCode);
+            using var readinessJson = System.Text.Json.JsonDocument.Parse(await readiness.Content.ReadAsStringAsync());
+            Assert.Equal("ready", readinessJson.RootElement.GetProperty("status").GetString());
+            Assert.Equal("capturing", readinessJson.RootElement.GetProperty("capture").GetProperty("state").GetString());
+            var spool = readinessJson.RootElement.GetProperty("capture").GetProperty("spool");
+            Assert.Equal("available", spool.GetProperty("status").GetString());
+            Assert.Equal(4, spool.GetProperty("segmentLimit").GetInt32());
+            Assert.InRange(spool.GetProperty("segments").GetInt32(), 1, 4);
+        }
+        using var profileResponse = await session.GetAsync("/api/v1/system-profile");
+        Assert.Equal(HttpStatusCode.OK, profileResponse.StatusCode);
+        using var profileJson = System.Text.Json.JsonDocument.Parse(await profileResponse.Content.ReadAsStringAsync());
+        Assert.Equal("garage-watch-platform", profileJson.RootElement.GetProperty("serviceName").GetString());
+        Assert.True(profileJson.RootElement.TryGetProperty("applicationVersion", out _));
 
         HttpResponseMessage? playlist = null;
         var deadline = DateTime.UtcNow.AddSeconds(8);

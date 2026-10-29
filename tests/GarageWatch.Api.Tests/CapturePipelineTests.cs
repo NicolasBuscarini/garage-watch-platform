@@ -104,6 +104,30 @@ public sealed class CapturePipelineTests
     }
 
     [Fact]
+    public async Task Worker_reports_current_retained_segments_after_spool_quota_cleanup()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "garagewatch-capture-tests", Guid.NewGuid().ToString("N"));
+        var options = new CaptureOptions("synthetic", "garage-01", root, 1, 2, 1_048_576, null, "ffmpeg", "ffprobe");
+        var adapter = new FiveSegmentsThenWaitAdapter();
+        var worker = new CaptureWorker(options, adapter, new LocalSegmentSpool(options),
+            NullLogger<CaptureWorker>.Instance);
+        await worker.StartAsync(CancellationToken.None);
+        try
+        {
+            await adapter.Completed.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.Equal(2, worker.Status.Segments);
+            Assert.Equal(2, Directory.GetFiles(Path.Combine(root, "manifests"), "*.json").Length);
+            Assert.Equal(2, Directory.GetFiles(Path.Combine(root, "segments"), "*.ts").Length);
+        }
+        finally
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+            await worker.StopAsync(timeout.Token);
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task Initial_source_failure_does_not_claim_an_unobserved_previous_epoch()
     {
         var root = Path.Combine(Path.GetTempPath(), "garagewatch-capture-tests", Guid.NewGuid().ToString("N"));
@@ -192,6 +216,29 @@ public sealed class CapturePipelineTests
             await File.WriteAllBytesAsync(path, [0x47], cancellationToken);
             yield return new CapturedSegment(path, DateTimeOffset.UtcNow.AddSeconds(-1), DateTimeOffset.UtcNow);
             throw new InvalidOperationException("contract_source_dropped");
+        }
+    }
+
+    private sealed class FiveSegmentsThenWaitAdapter : ISegmentCaptureAdapter
+    {
+        public TaskCompletionSource<bool> Completed { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public string Name => "contract-quota-source";
+        public string Version => "1.0";
+        public IReadOnlyList<string> Capabilities => ["contract-test"];
+
+        public async IAsyncEnumerable<CapturedSegment> CaptureAsync(string workDirectory,
+            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
+        {
+            Directory.CreateDirectory(workDirectory);
+            for (var index = 0; index < 5; index++)
+            {
+                var path = Path.Combine(workDirectory, $"contract-{index}.ts");
+                await File.WriteAllBytesAsync(path, [(byte)index, 0x47], cancellationToken);
+                var endedAt = DateTimeOffset.UtcNow.AddSeconds(index);
+                yield return new CapturedSegment(path, endedAt.AddSeconds(-1), endedAt);
+            }
+            Completed.TrySetResult(true);
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
         }
     }
 

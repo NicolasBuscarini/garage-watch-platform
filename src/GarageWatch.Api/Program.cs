@@ -1,6 +1,7 @@
 using GarageWatch.Api.Behaviors;
 using GarageWatch.Api.Contracts;
 using GarageWatch.Api.Correlation;
+using GarageWatch.Api.Presence;
 using GarageWatch.Api.Errors;
 using GarageWatch.Api.Live;
 using GarageWatch.Api.Observability;
@@ -22,6 +23,8 @@ builder.Services.AddScoped<CorrelationContext>();
 builder.Services.AddScoped<ICorrelationContext>(services => services.GetRequiredService<CorrelationContext>());
 builder.Services.AddPlatformInfrastructure(builder.Configuration);
 builder.Services.AddSingleton<LivePlaylistSequence>();
+builder.Services.AddSingleton<TimeProvider>(TimeProvider.System);
+builder.Services.AddSingleton<ClientPresenceRegistry>();
 builder.Services.AddSingleton(provider => LocalAuthenticationOptions.FromEnvironment(
     provider.GetRequiredService<IConfiguration>()));
 builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme).AddCookie(options =>
@@ -75,7 +78,8 @@ app.Use(async (context, next) =>
 });
 
 app.MapGet("/health/live", () => Results.Ok(new { status = "live" }));
-app.MapGet("/health/ready", (GarageWatch.Infrastructure.Capture.CaptureWorker capture) =>
+app.MapGet("/health/ready", (GarageWatch.Infrastructure.Capture.CaptureWorker capture,
+    GarageWatch.Infrastructure.Capture.CaptureOptions captureOptions) =>
 {
     var ready = capture.Status.State == "capturing";
     var response = new
@@ -90,7 +94,13 @@ app.MapGet("/health/ready", (GarageWatch.Infrastructure.Capture.CaptureWorker ca
             capture.Status.StreamEpoch,
             capture.Status.Gaps,
             capture.Status.Segments,
-            capture.Status.LastErrorCode
+            capture.Status.LastErrorCode,
+            spool = new
+            {
+                status = capture.Status.State == "spool-unavailable" ? "unavailable" : "available",
+                segments = capture.Status.Segments,
+                segmentLimit = captureOptions.MaximumSegments
+            }
         }
     };
     return Results.Json(response, statusCode: ready ? StatusCodes.Status200OK : StatusCodes.Status503ServiceUnavailable);
@@ -115,6 +125,14 @@ app.MapGet("/api/v1/auth/session", (ClaimsPrincipal user) =>
     Results.Ok(new { authenticated = user.Identity?.IsAuthenticated == true })).AllowAnonymous();
 app.MapGet("/api/v1/auth/me", (ClaimsPrincipal user) => Results.Ok(new AuthenticatedUser(
     user.Identity?.Name ?? "", user.FindFirstValue(ClaimTypes.Role) ?? "Viewer"))).RequireAuthorization("Viewer");
+app.MapPut("/api/v1/clients/presence", (ClientPresenceHeartbeat request, ClientPresenceRegistry registry) =>
+{
+    if (request.ClientId == Guid.Empty) return Results.BadRequest(new { code = "invalid_client_id" });
+    if (!registry.Heartbeat(request.ClientId, out var activeClients))
+        return Results.Json(new { code = "client_capacity_reached", activeClients },
+            statusCode: StatusCodes.Status429TooManyRequests);
+    return Results.Ok(new { activeClients, leaseSeconds = ClientPresenceRegistry.LeaseDuration.TotalSeconds });
+}).RequireAuthorization("Viewer");
 app.MapGet("/api/v1/cameras", (GarageWatch.Infrastructure.Capture.CaptureOptions captureOptions,
     GarageWatch.Infrastructure.Capture.CaptureWorker capture) => Results.Ok(new[] { new
     {

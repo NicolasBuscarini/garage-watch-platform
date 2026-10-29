@@ -30,7 +30,7 @@ public sealed class CaptureWorker(
             {
                 var recoveredSegments = await spool.RecoverAsync(stoppingToken);
                 lock (_gate) _status = _status with { Gaps = spool.CountGaps(), Segments = recoveredSegments };
-                EnforceRetention();
+                UpdateRetainedSegments(EnforceRetention());
                 break;
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { return; }
@@ -62,7 +62,7 @@ public sealed class CaptureWorker(
                     SegmentBytes.Add(manifest.SizeBytes, metricTags);
                     SegmentDuration.Record(Math.Max(0, (segment.EndedAt - segment.StartedAt).TotalSeconds), metricTags);
                     logger.LogInformation("Segmento de captura confirmado: {SegmentId}, {SizeBytes} bytes", manifest.SegmentId, manifest.SizeBytes);
-                    EnforceRetention();
+                    UpdateRetainedSegments(EnforceRetention());
                 }
                 if (!stoppingToken.IsCancellationRequested) throw new InvalidOperationException("capture_stream_ended");
             }
@@ -104,10 +104,11 @@ public sealed class CaptureWorker(
         Update("stopped", null, null);
     }
 
-    private void EnforceRetention()
+    private int EnforceRetention()
     {
         var manifests = Directory.GetFiles(Path.Combine(options.SpoolDirectory, "manifests"), "*.json")
             .OrderBy(File.GetCreationTimeUtc).ToArray();
+        var retained = manifests.Length;
         foreach (var old in manifests.Take(Math.Max(0, manifests.Length - options.MaximumSegments)))
         {
             var segmentId = Path.GetFileNameWithoutExtension(old);
@@ -119,12 +120,19 @@ public sealed class CaptureWorker(
                 else if (LocalSegmentSpool.IsSafeSegmentId(segmentId))
                     File.Delete(Path.Combine(options.SpoolDirectory, "segments", segmentId + ".ts"));
                 File.Delete(old);
+                if (!File.Exists(old)) retained--;
             }
             catch (Exception exception) when (exception is IOException or System.Text.Json.JsonException)
             {
                 logger.LogWarning("Manifesto antigo não pôde ser reconciliado; motivo={FailureType}", exception.GetType().Name);
             }
         }
+        return retained;
+    }
+
+    private void UpdateRetainedSegments(int count)
+    {
+        lock (_gate) _status = _status with { Segments = count };
     }
 
     private void Update(string state, string? epoch, string? error, long gapsDelta = 0, long segmentsDelta = 0)
