@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
 using System.Net;
+using System.Net.Http.Json;
 using Microsoft.Extensions.Logging;
 using GarageWatch.Api.Correlation;
 using GarageWatch.Api.Observability;
@@ -18,6 +19,7 @@ public sealed class ObservabilityTests
         using var listener = CreateActivityListener(activities);
         using var factory = new ApiFactory();
         using var client = factory.CreateClient();
+        await AuthenticateAsync(client);
         const string traceId = "4bf92f3577b34da6a3ce929d0e0e4736";
         const string correlationId = "6f9619ff-8b86-d011-b42d-00cf4fc964ff";
         client.DefaultRequestHeaders.Add("traceparent", $"00-{traceId}-00f067aa0ba902b7-01");
@@ -42,6 +44,7 @@ public sealed class ObservabilityTests
         using var listener = CreateMeterListener(measurements);
         using var factory = new ApiFactory();
         using var client = factory.CreateClient();
+        await AuthenticateAsync(client);
 
         foreach (var correlationId in new[]
                  {
@@ -84,6 +87,7 @@ public sealed class ObservabilityTests
         using var meterListener = CreateMeterListener(measurements);
         using var factory = new ApiFactory(new ThrowingSystemProfileSource());
         using var client = factory.CreateClient();
+        await AuthenticateAsync(client);
         client.DefaultRequestHeaders.Add(CorrelationMiddleware.HeaderName, correlationId);
 
         using var response = await client.GetAsync("/api/v1/system-profile");
@@ -111,6 +115,7 @@ public sealed class ObservabilityTests
         var loggerProvider = new InMemoryLoggerProvider();
         using var factory = new ApiFactory(new ThrowingSystemProfileSource(), loggerProvider);
         using var client = factory.CreateClient();
+        await AuthenticateAsync(client);
         client.DefaultRequestHeaders.Add(CorrelationMiddleware.HeaderName, correlationId);
 
         using var response = await client.GetAsync("/api/v1/system-profile");
@@ -136,6 +141,7 @@ public sealed class ObservabilityTests
         using var listener = CreateHttpAndUseCaseActivityListener(activities);
         using var factory = new ApiFactory(loggerProvider: loggerProvider);
         using var client = factory.CreateClient();
+        await AuthenticateAsync(client);
 
         using var response = await client.GetAsync($"/api/v1/system-profile?token={querySentinel}");
         var traceValues = string.Join("|", activities.SelectMany(activity =>
@@ -175,6 +181,14 @@ public sealed class ObservabilityTests
         };
         ActivitySource.AddActivityListener(listener);
         return listener;
+    }
+
+    private static async Task AuthenticateAsync(HttpClient client)
+    {
+        using var response = await client.PostAsJsonAsync("/api/v1/auth/login",
+            new { username = "contract-user", password = "contract-password-12345" });
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+        client.DefaultRequestHeaders.Add("Cookie", response.Headers.GetValues("Set-Cookie").Single().Split(';', 2)[0]);
     }
 
     private static MeterListener CreateMeterListener(ConcurrentBag<MetricMeasurement> measurements)

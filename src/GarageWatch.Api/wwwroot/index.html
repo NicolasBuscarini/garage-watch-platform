@@ -52,6 +52,14 @@
     </section>
 
     <section id="dashboard" class="hidden" aria-label="Estado da garagem">
+      <nav id="view-tabs" class="view-tabs mb-3" role="tablist" aria-label="Telas do painel">
+        <button id="tab-monitor" class="view-tab" type="button" role="tab" aria-selected="true" aria-controls="view-monitor" data-view-tab="view-monitor">Monitoramento</button>
+        <button id="tab-health" class="view-tab" type="button" role="tab" aria-selected="false" aria-controls="view-health" data-view-tab="view-health" data-admin-only="true" hidden disabled>Saúde do sistema</button>
+        <button id="tab-dependencies" class="view-tab" type="button" role="tab" aria-selected="false" aria-controls="view-dependencies" data-view-tab="view-dependencies" data-admin-only="true" hidden disabled>Dependências</button>
+        <button id="tab-capture" class="view-tab" type="button" role="tab" aria-selected="false" aria-controls="view-capture" data-view-tab="view-capture" data-admin-only="true" hidden disabled>Segmentos e lacunas</button>
+      </nav>
+
+      <section id="view-monitor" data-view-panel role="tabpanel" aria-labelledby="tab-monitor" tabindex="0">
       <section class="panel-card camera-summary mb-3" aria-label="Estado da câmera">
         <div class="d-flex flex-wrap align-items-center justify-content-between gap-3">
           <div>
@@ -71,23 +79,34 @@
           </div>
           <span class="live-indicator"><span aria-hidden="true"></span> LIVE</span>
         </div>
-        <div class="player-frame">
-          <video id="live" class="live-video" controls playsinline preload="none" aria-label="Vídeo ao vivo da câmera"></video>
-        </div>
-        <div class="player-toolbar" aria-label="Controles do player">
+        <div class="player-shell">
+          <div class="player-frame">
+            <video id="live" class="live-video" playsinline preload="none" aria-label="Vídeo ao vivo da câmera"></video>
+          </div>
+          <div class="player-toolbar" aria-label="Controles do player">
           <button id="player-toggle" class="btn-player" type="button" aria-label="Reproduzir vídeo" disabled>
             <svg id="player-play-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M6 3.8c0-.7.8-1.1 1.4-.7l9.2 6.2a.9.9 0 0 1 0 1.4l-9.2 6.2c-.6.4-1.4 0-1.4-.7V3.8Z" fill="currentColor"/></svg>
             <svg id="player-pause-icon" class="hidden" viewBox="0 0 20 20" aria-hidden="true"><path d="M5 4.5c0-.6.4-1 1-1h2c.6 0 1 .4 1 1v11c0 .6-.4 1-1 1H6c-.6 0-1-.4-1-1v-11ZM11 4.5c0-.6.4-1 1-1h2c.6 0 1 .4 1 1v11c0 .6-.4 1-1 1h-2c-.6 0-1-.4-1-1v-11Z" fill="currentColor"/></svg>
             <span id="player-toggle-label">Reproduzir</span>
           </button>
-          <span class="player-toolbar-hint">Áudio e vídeo iniciam após interação</span>
+          <button id="player-backward" class="btn-player btn-player-icon" type="button" aria-label="Voltar 10 segundos" title="Voltar 10 segundos" disabled>−10</button>
+          <button id="player-forward" class="btn-player btn-player-icon" type="button" aria-label="Avançar 10 segundos" title="Avançar 10 segundos" disabled>+10</button>
+          <output id="player-current-time" class="player-time" aria-label="Posição atual">00:00</output>
+          <input id="player-seek" class="player-seek" type="range" min="0" max="1000" value="0" aria-label="Posição do vídeo" disabled>
+          <output id="player-duration" class="player-time" aria-label="Duração ou janela disponível">—</output>
+          <button id="player-mute" class="btn-player btn-player-icon" type="button" aria-label="Silenciar áudio" title="Silenciar áudio" disabled>Áudio</button>
+          <input id="player-volume" class="player-volume" type="range" min="0" max="1" step="0.05" value="1" aria-label="Volume" disabled>
+          <button id="player-fullscreen" class="btn-player btn-player-icon" type="button" aria-label="Abrir em tela cheia" title="Tela cheia" disabled>⛶</button>
           <button id="player-sync" class="btn-live-sync" type="button" aria-label="Ir ao ponto mais recente do vídeo" disabled>
             <span class="live-sync-dot" aria-hidden="true"></span><span id="player-sync-label">AO VIVO</span>
           </button>
+          </div>
         </div>
-        <p id="live-message" class="small text-secondary mt-2 mb-0" role="status" aria-live="polite">Clique em reproduzir para iniciar áudio e vídeo.</p>
+        <p id="live-message" class="small text-secondary mt-2 mb-0" role="status" aria-live="polite">Use os controles do painel para iniciar áudio e vídeo.</p>
+      </section>
       </section>
 
+      <section id="view-health" data-view-panel role="tabpanel" aria-labelledby="tab-health" tabindex="0" hidden>
       <div class="d-flex align-items-end justify-content-between gap-2 mb-3">
         <div>
           <p class="eyebrow mb-1">OPERAÇÃO</p>
@@ -167,7 +186,9 @@
           </div>
         </div>
       </section>
+      </section>
 
+      <section id="view-dependencies" data-view-panel role="tabpanel" aria-labelledby="tab-dependencies" tabindex="0" hidden>
       <section class="panel-card dependencies-panel mb-3" aria-labelledby="dependencies-title">
         <div class="mb-3">
           <p class="eyebrow mb-1">MAPA DO PERFIL ATIVO</p>
@@ -187,7 +208,7 @@
           </div>
           <div class="dependency-item">
             <span class="dependency-icon active-icon" aria-hidden="true">●</span>
-            <div><strong>Spool local</strong><span><span id="spool-segments">—</span>/<span id="spool-limit">—</span> segmentos · <span id="spool-gaps">—</span> lacunas</span></div>
+            <div><strong>Spool local</strong><span>Armazenamento usado pela captura local</span></div>
             <span id="dep-spool" class="dependency-state">—</span>
           </div>
           <div class="dependency-item">
@@ -203,13 +224,18 @@
         </div>
         <p class="operational-note mt-3 mb-0">A contagem do spool não representa capacidade livre de disco. Serviços não configurados não são sondados nem tratados como saudáveis.</p>
       </section>
+      </section>
 
+      <section id="view-capture" data-view-panel role="tabpanel" aria-labelledby="tab-capture" tabindex="0" hidden>
+      <div class="d-flex flex-wrap align-items-baseline justify-content-between gap-2 mb-3">
+        <div><p class="eyebrow mb-1">CAPTURA LOCAL</p><h2 class="h4 mb-0">Segmentos e lacunas</h2></div>
+      </div>
       <div class="row g-3" aria-label="Métricas de captura">
         <div class="col-6">
           <article class="panel-card metric-card h-100">
             <p class="eyebrow mb-2">SEGMENTOS</p>
             <strong id="segments" class="metric-value">—</strong>
-            <span class="metric-caption">retidos no spool local</span>
+            <span class="metric-caption">retidos no spool local<span id="spool-limit-container" class="hidden"> · limite <strong id="spool-limit">—</strong></span></span>
           </article>
         </div>
         <div class="col-6">
@@ -221,11 +247,12 @@
         </div>
       </div>
       <p class="operational-note mt-4 mb-0">Ambiente local de desenvolvimento. A reprodução não homologa latência, qualidade ou estabilidade da câmera.</p>
+      </section>
     </section>
 
     <p id="message" class="feedback error-text mt-3" role="status" aria-live="polite"></p>
   </main>
   <script src="/vendor/hls.min.js" defer></script>
-  <script src="/app.js" defer></script>
+  <script src="/app.js?v=modules-1" type="module"></script>
 </body>
 </html>

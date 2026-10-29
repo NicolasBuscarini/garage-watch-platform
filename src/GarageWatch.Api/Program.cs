@@ -46,7 +46,11 @@ builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationSc
         return Task.CompletedTask;
     };
 });
-builder.Services.AddAuthorization(options => options.AddPolicy("Viewer", policy => policy.RequireRole("Viewer", "Administrator")));
+builder.Services.AddAuthorization(options =>
+{
+    options.AddPolicy("Viewer", policy => policy.RequireRole("Viewer", "Administrator"));
+    options.AddPolicy("Administrator", policy => policy.RequireRole("Administrator"));
+});
 builder.Services.AddRateLimiter(options => options.AddFixedWindowLimiter("login", limiter =>
 {
     limiter.PermitLimit = 5;
@@ -65,17 +69,17 @@ var app = builder.Build();
 _ = app.Services.GetRequiredService<LocalAuthenticationOptions>();
 app.UseMiddleware<CorrelationMiddleware>();
 app.UseMiddleware<SafeExceptionMiddleware>();
-app.UseDefaultFiles();
-app.UseStaticFiles();
-app.UseRateLimiter();
-app.UseAuthentication();
-app.UseAuthorization();
 app.Use(async (context, next) =>
 {
     context.Response.Headers.XContentTypeOptions = "nosniff";
     context.Response.Headers.CacheControl = "no-store";
     await next();
 });
+app.UseDefaultFiles();
+app.UseStaticFiles();
+app.UseRateLimiter();
+app.UseAuthentication();
+app.UseAuthorization();
 
 app.MapGet("/health/live", () => Results.Ok(new { status = "live" }));
 app.MapGet("/health/ready", (GarageWatch.Infrastructure.Capture.CaptureWorker capture,
@@ -104,7 +108,7 @@ app.MapGet("/health/ready", (GarageWatch.Infrastructure.Capture.CaptureWorker ca
         }
     };
     return Results.Json(response, statusCode: ready ? StatusCodes.Status200OK : StatusCodes.Status503ServiceUnavailable);
-}).RequireAuthorization("Viewer");
+}).RequireAuthorization("Administrator");
 app.MapPost("/api/v1/auth/login", async (LoginRequest request, LocalAuthenticationOptions credentials,
     HttpContext context) =>
 {
@@ -138,10 +142,6 @@ app.MapGet("/api/v1/cameras", (GarageWatch.Infrastructure.Capture.CaptureOptions
     {
         cameraId = captureOptions.CameraId,
         status = capture.Status.State,
-        adapter = capture.Status.Adapter,
-        streamEpoch = capture.Status.StreamEpoch,
-        segments = capture.Status.Segments,
-        gaps = capture.Status.Gaps,
         liveUrl = $"/api/v1/live/{captureOptions.CameraId}/index.m3u8"
     }
 })).RequireAuthorization("Viewer");
@@ -189,7 +189,7 @@ app.MapGet("/api/v1/system-profile", async (
         profile.ServiceName,
         profile.Environment,
         profile.ApplicationVersion));
-});
+}).RequireAuthorization("Administrator");
 
 app.Run();
 

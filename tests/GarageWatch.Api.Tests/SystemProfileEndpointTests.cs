@@ -13,6 +13,7 @@ public sealed class SystemProfileEndpointTests
     {
         using var factory = new ApiFactory();
         using var client = factory.CreateClient();
+        await AuthenticateAsync(client);
         const string requestedId = "6f9619ff-8b86-d011-b42d-00cf4fc964ff";
         client.DefaultRequestHeaders.Add(CorrelationMiddleware.HeaderName, requestedId);
 
@@ -32,6 +33,7 @@ public sealed class SystemProfileEndpointTests
     {
         using var factory = new ApiFactory();
         using var client = factory.CreateClient();
+        await AuthenticateAsync(client);
 
         using var response = await client.GetAsync("/api/v1/system-profile");
         using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
@@ -47,6 +49,7 @@ public sealed class SystemProfileEndpointTests
     {
         using var factory = new ApiFactory();
         using var client = factory.CreateClient();
+        await AuthenticateAsync(client);
         client.DefaultRequestHeaders.Add(CorrelationMiddleware.HeaderName, "invalid/value-with-secret");
 
         using var response = await client.GetAsync("/api/v1/system-profile");
@@ -65,6 +68,7 @@ public sealed class SystemProfileEndpointTests
     {
         using var factory = new ApiFactory(new ThrowingSystemProfileSource());
         using var client = factory.CreateClient();
+        await AuthenticateAsync(client);
 
         using var response = await client.GetAsync("/api/v1/system-profile");
         var bodyText = await response.Content.ReadAsStringAsync();
@@ -80,6 +84,7 @@ public sealed class SystemProfileEndpointTests
     {
         using var factory = new ApiFactory();
         using var client = factory.CreateClient();
+        await AuthenticateAsync(client);
         await AuthenticateAsync(client);
 
         using (var live = await client.GetAsync("/health/live"))
@@ -161,6 +166,7 @@ public sealed class SystemProfileEndpointTests
     {
         using var factory = new ApiFactory();
         using var client = factory.CreateClient();
+        await AuthenticateAsync(client);
         using var response = await client.GetAsync("/api/v1/system-profile");
         using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         using var schema = JsonDocument.Parse(await File.ReadAllTextAsync(

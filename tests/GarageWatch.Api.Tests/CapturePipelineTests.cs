@@ -151,6 +151,29 @@ public sealed class CapturePipelineTests
     }
 
     [Fact]
+    public async Task Worker_reports_retained_gap_count_after_gap_quota_cleanup()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "garagewatch-capture-tests", Guid.NewGuid().ToString("N"));
+        var options = new CaptureOptions("synthetic", "garage-01", root, 1, 2, 1_048_576, null, "ffmpeg", "ffprobe");
+        var adapter = new ThreeFailuresThenWaitAdapter();
+        var spool = new LocalSegmentSpool(options);
+        var worker = new CaptureWorker(options, adapter, spool, NullLogger<CaptureWorker>.Instance);
+        await worker.StartAsync(CancellationToken.None);
+        try
+        {
+            await adapter.Completed.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            Assert.Equal(2, spool.CountGaps());
+            Assert.Equal(2, worker.Status.Gaps);
+        }
+        finally
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+            await worker.StopAsync(timeout.Token);
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task Gap_spool_failure_keeps_worker_alive_and_degraded()
     {
         var root = Path.Combine(Path.GetTempPath(), "garagewatch-capture-tests", Guid.NewGuid().ToString("N"));
@@ -254,6 +277,27 @@ public sealed class CapturePipelineTests
             await Task.Yield();
             if (cancellationToken.IsCancellationRequested) yield break;
             throw new InvalidOperationException("contract_source_unavailable");
+        }
+    }
+
+    private sealed class ThreeFailuresThenWaitAdapter : ISegmentCaptureAdapter
+    {
+        private int _failures;
+        public TaskCompletionSource<bool> Completed { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public string Name => "contract-gap-quota-source";
+        public string Version => "1.0";
+        public IReadOnlyList<string> Capabilities => ["contract-test"];
+
+        public async IAsyncEnumerable<CapturedSegment> CaptureAsync(string workDirectory,
+            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
+        {
+            await Task.Yield();
+            if (Interlocked.Increment(ref _failures) <= 3)
+                throw new InvalidOperationException("contract_source_unavailable");
+
+            Completed.TrySetResult(true);
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            yield break;
         }
     }
 

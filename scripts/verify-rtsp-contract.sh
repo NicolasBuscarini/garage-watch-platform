@@ -5,7 +5,7 @@ cd "$(dirname "$0")/.."
 export RTSP_CONTRACT_RUN_ID="$(date +%s)-$$"
 export AUTH_USERNAME="rtsp-contract-test"
 export AUTH_PASSWORD="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
-export AUTH_ROLE="Viewer"
+export AUTH_ROLE="Administrator"
 spool_directory="data/rtsp-contract-${RTSP_CONTRACT_RUN_ID}"
 cookie_file="/tmp/garage-watch-rtsp-${RTSP_CONTRACT_RUN_ID}.cookies"
 cleanup() {

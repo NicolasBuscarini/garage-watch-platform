@@ -64,13 +64,26 @@ public sealed class AuthenticationAndLiveTests
         Assert.Contains("id=\"gateway-health\"", html, StringComparison.Ordinal);
         Assert.Contains("id=\"client-count\"", html, StringComparison.Ordinal);
         Assert.Contains("aria-label=\"Clientes conectados\"", html, StringComparison.Ordinal);
+        Assert.Contains("role=\"tablist\"", html, StringComparison.Ordinal);
+        Assert.Contains("data-admin-only=\"true\"", html, StringComparison.Ordinal);
+        Assert.Contains("id=\"view-monitor\"", html, StringComparison.Ordinal);
+        Assert.Contains("id=\"view-health\"", html, StringComparison.Ordinal);
+        Assert.Contains("id=\"view-dependencies\"", html, StringComparison.Ordinal);
+        Assert.Contains("id=\"view-capture\"", html, StringComparison.Ordinal);
+        Assert.Equal(1, CountOccurrences(html, "id=\"spool-limit\""));
+        Assert.Contains("retidos no spool local<span id=\"spool-limit-container\"", html, StringComparison.Ordinal);
+        Assert.DoesNotContain("Limite do spool:", html, StringComparison.Ordinal);
+        Assert.Contains("/app.js?v=modules-1\" type=\"module\"", html, StringComparison.Ordinal);
         Assert.Contains("id=\"player-toggle\"", html, StringComparison.Ordinal);
         Assert.Contains("id=\"player-sync\"", html, StringComparison.Ordinal);
         var cameraSection = html.IndexOf("CÂMERA ATIVA", StringComparison.Ordinal);
         var monitorSection = html.IndexOf("MONITORAMENTO", StringComparison.Ordinal);
-        var operationsSection = html.IndexOf("Saúde do sistema", StringComparison.Ordinal);
+        var operationsSection = html.IndexOf("<h2 class=\"h4 mb-0\">Saúde do sistema", StringComparison.Ordinal);
         Assert.True(cameraSection >= 0 && cameraSection < monitorSection && monitorSection < operationsSection);
-        Assert.Contains("<video id=\"live\" class=\"live-video\" controls playsinline preload=\"none\"", html, StringComparison.Ordinal);
+        Assert.Contains("<video id=\"live\" class=\"live-video\" playsinline preload=\"none\"", html, StringComparison.Ordinal);
+        Assert.DoesNotContain("<video id=\"live\" class=\"live-video\" controls", html, StringComparison.Ordinal);
+        foreach (var controlId in new[] { "player-backward", "player-forward", "player-seek", "player-volume", "player-mute", "player-fullscreen" })
+            Assert.Contains($"id=\"{controlId}\"", html, StringComparison.Ordinal);
         Assert.DoesNotContain("autoplay muted", html, StringComparison.Ordinal);
         var bootstrapCss = await anonymous.GetByteArrayAsync("/vendor/bootstrap.min.css");
         Assert.Equal("a7695108838ea4708a547d2d07fb37c4889eb663fb18c3761677ed6a50c4fe41",
@@ -84,25 +97,43 @@ public sealed class AuthenticationAndLiveTests
         Assert.Contains("@media (max-width: 575.98px)", appCss, StringComparison.Ordinal);
         using var favicon = await anonymous.GetAsync("/favicon.svg");
         Assert.Equal(HttpStatusCode.OK, favicon.StatusCode);
+        using var staticScript = await anonymous.GetAsync("/app.js?v=modules-1");
+        Assert.Equal("no-store", staticScript.Headers.CacheControl?.ToString());
         var appScript = await anonymous.GetStringAsync("/app.js");
-        Assert.Contains("Falha HLS (", appScript, StringComparison.Ordinal);
-        Assert.Contains("maxBufferLength: 12", appScript, StringComparison.Ordinal);
-        Assert.Contains("maxMaxBufferLength: 18", appScript, StringComparison.Ordinal);
-        Assert.Contains("xhr.withCredentials = true", appScript, StringComparison.Ordinal);
-        Assert.Contains("/health/live", appScript, StringComparison.Ordinal);
-        Assert.Contains("/health/ready", appScript, StringComparison.Ordinal);
-        Assert.Contains("/api/v1/system-profile", appScript, StringComparison.Ordinal);
-        Assert.Contains("/api/v1/system-profile", appScript, StringComparison.Ordinal);
-        Assert.Contains("/api/v1/clients/presence", appScript, StringComparison.Ordinal);
-        Assert.Contains("crypto.randomUUID()", appScript, StringComparison.Ordinal);
-        Assert.Contains("setInterval(() => void sendClientHeartbeat(), 10000)", appScript, StringComparison.Ordinal);
-        Assert.Contains("hls.liveSyncPosition", appScript, StringComparison.Ordinal);
-        Assert.Contains("video.seekable.end(range)", appScript, StringComparison.Ordinal);
-        Assert.Contains("video.currentTime = target", appScript, StringComparison.Ordinal);
-        Assert.Contains("camera.liveUrl", appScript, StringComparison.Ordinal);
-        Assert.Contains("delete video.dataset.url", appScript, StringComparison.Ordinal);
-        Assert.Contains("capture_source_unavailable", appScript, StringComparison.Ordinal);
-        Assert.Contains("Clique em reproduzir para iniciar áudio e vídeo.", html, StringComparison.Ordinal);
+        Assert.Contains("from './js/navigation.js'", appScript, StringComparison.Ordinal);
+        Assert.Contains("from './js/presence.js'", appScript, StringComparison.Ordinal);
+        var presenceScript = await anonymous.GetStringAsync("/js/presence.js");
+        Assert.Contains("crypto.randomUUID", presenceScript, StringComparison.Ordinal);
+        Assert.Contains("getRandomValues", presenceScript, StringComparison.Ordinal);
+        Assert.Contains("Math.random() * 256", presenceScript, StringComparison.Ordinal);
+        Assert.Contains("body.activeClients ?? body.ActiveClients", presenceScript, StringComparison.Ordinal);
+        Assert.Contains("/api/v1/clients/presence", presenceScript, StringComparison.Ordinal);
+        Assert.Contains("setInterval(() => void heartbeat(), 10000)", presenceScript, StringComparison.Ordinal);
+        var playerScript = await anonymous.GetStringAsync("/js/player.js");
+        Assert.Contains("Falha HLS (", playerScript, StringComparison.Ordinal);
+        Assert.Contains("maxBufferLength: 12", playerScript, StringComparison.Ordinal);
+        Assert.Contains("maxMaxBufferLength: 18", playerScript, StringComparison.Ordinal);
+        Assert.Contains("xhr.withCredentials = true", playerScript, StringComparison.Ordinal);
+        Assert.Contains("hls.liveSyncPosition", playerScript, StringComparison.Ordinal);
+        Assert.Contains("video.seekable.end(range)", playerScript, StringComparison.Ordinal);
+        Assert.Contains("video.currentTime = target", playerScript, StringComparison.Ordinal);
+        Assert.Contains("function seekTo(time)", playerScript, StringComparison.Ordinal);
+        Assert.Contains("currentTime - 10", playerScript, StringComparison.Ordinal);
+        Assert.Contains("currentTime + 10", playerScript, StringComparison.Ordinal);
+        Assert.Contains("$('live').volume = volume", playerScript, StringComparison.Ordinal);
+        Assert.Contains("frame.requestFullscreen()", playerScript, StringComparison.Ordinal);
+        var operationsScript = await anonymous.GetStringAsync("/js/operations.js");
+        Assert.Contains("/health/live", operationsScript, StringComparison.Ordinal);
+        Assert.Contains("/health/ready", operationsScript, StringComparison.Ordinal);
+        Assert.Contains("/api/v1/system-profile", operationsScript, StringComparison.Ordinal);
+        Assert.Contains("Number.isFinite(spool?.segments) ? spool.segments", operationsScript, StringComparison.Ordinal);
+        Assert.Contains("const hasSegmentLimit = Number.isFinite(spool?.segmentLimit)", operationsScript, StringComparison.Ordinal);
+        Assert.Contains("classList.toggle('hidden', !hasSegmentLimit)", operationsScript, StringComparison.Ordinal);
+        Assert.Contains("Number.isFinite(capture.segments) ? capture.segments : camera?.segments", operationsScript, StringComparison.Ordinal);
+        Assert.Contains("Number.isFinite(capture.gaps) ? capture.gaps : camera?.gaps", operationsScript, StringComparison.Ordinal);
+        Assert.Contains("capture_source_unavailable", await anonymous.GetStringAsync("/js/api.js"), StringComparison.Ordinal);
+        Assert.Contains("dataset.adminOnly === 'true'", await anonymous.GetStringAsync("/js/navigation.js"), StringComparison.Ordinal);
+        Assert.Contains("Use os controles do painel para iniciar áudio e vídeo.", html, StringComparison.Ordinal);
         var player = await anonymous.GetByteArrayAsync("/vendor/hls.min.js");
         Assert.Equal("de49f5a3084f73c9e3e4e2999d6e789f8ea5aff0120d295631ecb9bf1480b3ea",
             Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(player)).ToLowerInvariant());
@@ -132,7 +163,10 @@ public sealed class AuthenticationAndLiveTests
         Assert.Contains("capture-test", body, StringComparison.Ordinal);
         Assert.DoesNotContain("rtsp", body, StringComparison.OrdinalIgnoreCase);
         using var cameraJson = System.Text.Json.JsonDocument.Parse(body);
-        var initialSegmentCount = cameraJson.RootElement[0].GetProperty("segments").GetInt64();
+        Assert.False(cameraJson.RootElement[0].TryGetProperty("segments", out _));
+        Assert.False(cameraJson.RootElement[0].TryGetProperty("gaps", out _));
+        Assert.False(cameraJson.RootElement[0].TryGetProperty("adapter", out _));
+        long initialSegmentCount = 0;
 
         using var liveness = await session.GetAsync("/health/live");
         Assert.Equal(HttpStatusCode.OK, liveness.StatusCode);
@@ -152,10 +186,15 @@ public sealed class AuthenticationAndLiveTests
             using var readinessJson = System.Text.Json.JsonDocument.Parse(await readiness.Content.ReadAsStringAsync());
             Assert.Equal("ready", readinessJson.RootElement.GetProperty("status").GetString());
             Assert.Equal("capturing", readinessJson.RootElement.GetProperty("capture").GetProperty("state").GetString());
+            var capture = readinessJson.RootElement.GetProperty("capture");
+            Assert.True(capture.GetProperty("segments").GetInt64() >= 1);
+            Assert.True(capture.GetProperty("gaps").GetInt64() >= 0);
             var spool = readinessJson.RootElement.GetProperty("capture").GetProperty("spool");
             Assert.Equal("available", spool.GetProperty("status").GetString());
             Assert.Equal(4, spool.GetProperty("segmentLimit").GetInt32());
             Assert.InRange(spool.GetProperty("segments").GetInt32(), 1, 4);
+            Assert.Equal(capture.GetProperty("segments").GetInt64(), spool.GetProperty("segments").GetInt64());
+            initialSegmentCount = spool.GetProperty("segments").GetInt64();
         }
         using var profileResponse = await session.GetAsync("/api/v1/system-profile");
         Assert.Equal(HttpStatusCode.OK, profileResponse.StatusCode);
@@ -227,9 +266,49 @@ public sealed class AuthenticationAndLiveTests
         Assert.False(response.Headers.Contains("Set-Cookie"));
     }
 
+    [Fact]
+    public async Task Viewer_can_monitor_but_cannot_read_administrative_status()
+    {
+        await using var factory = new ApiFactory(authRole: "Viewer");
+        using var client = factory.CreateClient(new() { AllowAutoRedirect = false });
+        using var login = await client.PostAsJsonAsync("/api/v1/auth/login",
+            new { username = "contract-user", password = "contract-password-12345" });
+        Assert.Equal(HttpStatusCode.NoContent, login.StatusCode);
+        client.DefaultRequestHeaders.Add("Cookie", Assert.Single(login.Headers.GetValues("Set-Cookie")).Split(';', 2)[0]);
+
+        var me = await client.GetFromJsonAsync<Dictionary<string, string>>("/api/v1/auth/me");
+        Assert.NotNull(me);
+        Assert.Equal("Viewer", me["role"]);
+        using var cameras = await client.GetAsync("/api/v1/cameras");
+        Assert.Equal(HttpStatusCode.OK, cameras.StatusCode);
+        using var cameraJson = System.Text.Json.JsonDocument.Parse(await cameras.Content.ReadAsStringAsync());
+        Assert.True(cameraJson.RootElement[0].TryGetProperty("liveUrl", out _));
+        Assert.False(cameraJson.RootElement[0].TryGetProperty("segments", out _));
+        Assert.False(cameraJson.RootElement[0].TryGetProperty("gaps", out _));
+
+        using var readiness = await client.GetAsync("/health/ready");
+        Assert.Equal(HttpStatusCode.Forbidden, readiness.StatusCode);
+        using var profile = await client.GetAsync("/api/v1/system-profile");
+        Assert.Equal(HttpStatusCode.Forbidden, profile.StatusCode);
+        using var presence = await client.PutAsJsonAsync("/api/v1/clients/presence", new { clientId = Guid.NewGuid() });
+        Assert.Equal(HttpStatusCode.OK, presence.StatusCode);
+    }
+
     private static long ReadMediaSequence(string playlist)
     {
         var line = playlist.Split('\n').First(value => value.StartsWith("#EXT-X-MEDIA-SEQUENCE:", StringComparison.Ordinal));
         return long.Parse(line["#EXT-X-MEDIA-SEQUENCE:".Length..], System.Globalization.CultureInfo.InvariantCulture);
+    }
+
+    private static int CountOccurrences(string value, string needle)
+    {
+        var count = 0;
+        var offset = 0;
+        while ((offset = value.IndexOf(needle, offset, StringComparison.Ordinal)) >= 0)
+        {
+            count++;
+            offset += needle.Length;
+        }
+        return count;
     }
 }

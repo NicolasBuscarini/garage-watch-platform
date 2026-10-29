@@ -94,7 +94,8 @@ public sealed class CaptureWorker(
                     : exception is InvalidDataException { Message: "capture_segment_size_limit" }
                         ? "capture_segment_size_limit"
                         : "capture_source_unavailable";
-                Update("reconnecting", null, errorCode, gapsDelta: 1);
+                Update("reconnecting", null, errorCode);
+                UpdateRetainedGaps(spool.CountGaps());
                 Gaps.Add(1, CreateMetricTags("gap"));
                 logger.LogWarning("Fonte de captura indisponível; nova tentativa limitada, motivo={FailureType}", exception.GetType().Name);
                 await Task.Delay(TimeSpan.FromSeconds(Math.Min(30, 1 << (failures - 1))), stoppingToken);
@@ -133,6 +134,11 @@ public sealed class CaptureWorker(
     private void UpdateRetainedSegments(int count)
     {
         lock (_gate) _status = _status with { Segments = count };
+    }
+
+    private void UpdateRetainedGaps(long count)
+    {
+        lock (_gate) _status = _status with { Gaps = count };
     }
 
     private void Update(string state, string? epoch, string? error, long gapsDelta = 0, long segmentsDelta = 0)

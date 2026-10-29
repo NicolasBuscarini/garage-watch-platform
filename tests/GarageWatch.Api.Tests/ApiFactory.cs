@@ -16,13 +16,15 @@ public sealed class ApiFactory : WebApplicationFactory<Program>
     private readonly ISystemProfileSource? _profileSource;
     private readonly ILoggerProvider? _loggerProvider;
     private readonly ISegmentCaptureAdapter? _captureAdapter;
+    private readonly string _authRole;
 
     public ApiFactory(ISystemProfileSource? profileSource = null, ILoggerProvider? loggerProvider = null,
-        ISegmentCaptureAdapter? captureAdapter = null)
+        ISegmentCaptureAdapter? captureAdapter = null, string authRole = "Administrator")
     {
         _profileSource = profileSource;
         _loggerProvider = loggerProvider;
         _captureAdapter = captureAdapter;
+        _authRole = authRole;
     }
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -32,7 +34,7 @@ public sealed class ApiFactory : WebApplicationFactory<Program>
         {
             ["AUTH_USERNAME"] = "contract-user",
             ["AUTH_PASSWORD"] = "contract-password-12345",
-            ["AUTH_ROLE"] = "Administrator"
+            ["AUTH_ROLE"] = _authRole
         }));
         if (_loggerProvider is not null)
         {
