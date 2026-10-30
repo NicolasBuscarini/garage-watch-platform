@@ -1,9 +1,11 @@
 using GarageWatch.Application.Profiles;
 using GarageWatch.Domain;
 using GarageWatch.Infrastructure.Capture;
+using GarageWatch.Infrastructure.Identity;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Configuration;
@@ -16,25 +18,34 @@ public sealed class ApiFactory : WebApplicationFactory<Program>
     private readonly ISystemProfileSource? _profileSource;
     private readonly ILoggerProvider? _loggerProvider;
     private readonly ISegmentCaptureAdapter? _captureAdapter;
-    private readonly string _authRole;
+    private readonly string _databasePath;
+    private readonly string? _bootstrapUsername;
+    private readonly string? _bootstrapPassword;
 
     public ApiFactory(ISystemProfileSource? profileSource = null, ILoggerProvider? loggerProvider = null,
-        ISegmentCaptureAdapter? captureAdapter = null, string authRole = "Administrator")
+        ISegmentCaptureAdapter? captureAdapter = null, string? databasePath = null,
+        string? bootstrapUsername = "contract-user", string? bootstrapPassword = "Contract-Password-123!")
     {
         _profileSource = profileSource;
         _loggerProvider = loggerProvider;
         _captureAdapter = captureAdapter;
-        _authRole = authRole;
+        Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), "garagewatch-tests"));
+        _databasePath = databasePath ?? Path.Combine(Path.GetTempPath(), "garagewatch-tests", $"{Guid.NewGuid():N}.db");
+        _bootstrapUsername = bootstrapUsername;
+        _bootstrapPassword = bootstrapPassword;
     }
+
+    public string DatabasePath => _databasePath;
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseEnvironment("Testing");
         builder.ConfigureAppConfiguration((_, configuration) => configuration.AddInMemoryCollection(new Dictionary<string, string?>
         {
-            ["AUTH_USERNAME"] = "contract-user",
-            ["AUTH_PASSWORD"] = "contract-password-12345",
-            ["AUTH_ROLE"] = _authRole
+            ["AUTH_USERNAME"] = _bootstrapUsername,
+            ["AUTH_PASSWORD"] = _bootstrapPassword,
+            ["AUTH_EMAIL"] = "contract-admin@example.invalid",
+            ["IDENTITY_DB_PATH"] = _databasePath
         }));
         if (_loggerProvider is not null)
         {
@@ -43,6 +54,7 @@ public sealed class ApiFactory : WebApplicationFactory<Program>
 
         builder.ConfigureTestServices(services =>
         {
+            services.Configure<SecurityStampValidatorOptions>(options => options.ValidationInterval = TimeSpan.Zero);
             var profileSource = _profileSource;
             if (profileSource is not null)
             {

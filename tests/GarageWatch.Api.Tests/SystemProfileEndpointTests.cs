@@ -111,7 +111,7 @@ public sealed class SystemProfileEndpointTests
     private static async Task AuthenticateAsync(HttpClient client)
     {
         using var response = await client.PostAsJsonAsync("/api/v1/auth/login",
-            new { username = "contract-user", password = "contract-password-12345" });
+            new { username = "contract-user", password = "Contract-Password-123!" });
         Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
         client.DefaultRequestHeaders.Add("Cookie", response.Headers.GetValues("Set-Cookie").Single().Split(';', 2)[0]);
     }

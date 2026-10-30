@@ -1,8 +1,10 @@
 using System.Net;
 using System.Net.Http.Json;
-using GarageWatch.Api.Security;
 using GarageWatch.Api.Live;
+using GarageWatch.Infrastructure.Identity;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 namespace GarageWatch.Api.Tests;
@@ -22,22 +24,25 @@ public sealed class AuthenticationAndLiveTests
     }
 
     [Theory]
-    [InlineData("abc123", true)]
-    [InlineData("abc12", false)]
-    [InlineData("replace-with-a-local-password-of-6-or-more-characters", false)]
-    public void LocalPasswordMustMeetSixCharacterMinimumAndRejectExample(string password, bool accepted)
+    [InlineData("Valid-Password-123!", true)]
+    [InlineData("short", false)]
+    [InlineData("replace-with-a-strong-password", false)]
+    public void BootstrapPasswordMustMeetMinimumAndRejectExample(string password, bool accepted)
     {
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
         {
             ["AUTH_USERNAME"] = "contract-user",
             ["AUTH_PASSWORD"] = password,
-            ["AUTH_ROLE"] = "Viewer"
         }).Build();
 
         if (accepted)
-            Assert.NotNull(LocalAuthenticationOptions.FromEnvironment(configuration));
+        {
+            var options = IdentityBootstrapOptions.FromConfiguration(configuration);
+            Assert.True(options.IsConfigured);
+            options.ValidateForBootstrap();
+        }
         else
-            Assert.Throws<InvalidOperationException>(() => LocalAuthenticationOptions.FromEnvironment(configuration));
+            Assert.Throws<InvalidOperationException>(() => IdentityBootstrapOptions.FromConfiguration(configuration).ValidateForBootstrap());
     }
 
     [Fact]
@@ -145,7 +150,7 @@ public sealed class AuthenticationAndLiveTests
         Assert.False(anonymousSession["authenticated"]);
 
         using var login = await anonymous.PostAsJsonAsync("/api/v1/auth/login",
-            new { username = "contract-user", password = "contract-password-12345" });
+            new { username = "contract-user", password = "Contract-Password-123!" });
         Assert.Equal(HttpStatusCode.NoContent, login.StatusCode);
         var cookie = Assert.Single(login.Headers.GetValues("Set-Cookie"));
         Assert.Contains("garagewatch.session=", cookie, StringComparison.Ordinal);
@@ -269,10 +274,24 @@ public sealed class AuthenticationAndLiveTests
     [Fact]
     public async Task Viewer_can_monitor_but_cannot_read_administrative_status()
     {
-        await using var factory = new ApiFactory(authRole: "Viewer");
+        await using var factory = new ApiFactory();
         using var client = factory.CreateClient(new() { AllowAutoRedirect = false });
+        using (var scope = factory.Services.CreateScope())
+        {
+            var userManager = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
+            var viewer = new ApplicationUser
+            {
+                Id = Guid.NewGuid(),
+                UserName = "viewer-user",
+                Email = "viewer@example.invalid",
+                IsActive = true
+            };
+            var created = await userManager.CreateAsync(viewer, "Viewer-Password-123!");
+            Assert.True(created.Succeeded, string.Join(",", created.Errors.Select(error => error.Code)));
+            Assert.True((await userManager.AddToRoleAsync(viewer, "Viewer")).Succeeded);
+        }
         using var login = await client.PostAsJsonAsync("/api/v1/auth/login",
-            new { username = "contract-user", password = "contract-password-12345" });
+            new { username = "viewer-user", password = "Viewer-Password-123!" });
         Assert.Equal(HttpStatusCode.NoContent, login.StatusCode);
         client.DefaultRequestHeaders.Add("Cookie", Assert.Single(login.Headers.GetValues("Set-Cookie")).Split(';', 2)[0]);
 

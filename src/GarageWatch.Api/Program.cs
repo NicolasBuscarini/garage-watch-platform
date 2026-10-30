@@ -6,11 +6,12 @@ using GarageWatch.Api.Errors;
 using GarageWatch.Api.Live;
 using GarageWatch.Api.Observability;
 using GarageWatch.Api.Security;
+using GarageWatch.Infrastructure.Identity;
 using GarageWatch.Application.Profiles;
 using GarageWatch.Infrastructure;
 using MediatR;
-using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.RateLimiting;
 using System.Security.Claims;
 
@@ -19,15 +20,15 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Logging.ClearProviders();
 builder.Logging.AddJsonConsole(options => options.IncludeScopes = true);
 builder.Logging.AddFilter("Microsoft.AspNetCore.Hosting.Diagnostics", LogLevel.Warning);
+builder.Logging.AddFilter("Microsoft.EntityFrameworkCore", LogLevel.Warning);
 builder.Services.AddScoped<CorrelationContext>();
 builder.Services.AddScoped<ICorrelationContext>(services => services.GetRequiredService<CorrelationContext>());
 builder.Services.AddPlatformInfrastructure(builder.Configuration);
 builder.Services.AddSingleton<LivePlaylistSequence>();
 builder.Services.AddSingleton<TimeProvider>(TimeProvider.System);
 builder.Services.AddSingleton<ClientPresenceRegistry>();
-builder.Services.AddSingleton(provider => LocalAuthenticationOptions.FromEnvironment(
-    provider.GetRequiredService<IConfiguration>()));
-builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme).AddCookie(options =>
+builder.Services.AddAuthentication(IdentityConstants.ApplicationScheme).AddIdentityCookies();
+builder.Services.ConfigureApplicationCookie(options =>
 {
     options.Cookie.Name = "garagewatch.session";
     options.Cookie.HttpOnly = true;
@@ -35,6 +36,7 @@ builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationSc
     options.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
     options.ExpireTimeSpan = TimeSpan.FromHours(8);
     options.SlidingExpiration = false;
+    options.Events.OnValidatePrincipal = SecurityStampValidator.ValidatePrincipalAsync;
     options.Events.OnRedirectToLogin = context =>
     {
         context.Response.StatusCode = StatusCodes.Status401Unauthorized;
@@ -46,6 +48,7 @@ builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationSc
         return Task.CompletedTask;
     };
 });
+builder.Services.Configure<SecurityStampValidatorOptions>(options => options.ValidationInterval = TimeSpan.FromSeconds(15));
 builder.Services.AddAuthorization(options =>
 {
     options.AddPolicy("Viewer", policy => policy.RequireRole("Viewer", "Administrator"));
@@ -66,7 +69,8 @@ builder.Services.AddMediatR(configuration =>
 });
 
 var app = builder.Build();
-_ = app.Services.GetRequiredService<LocalAuthenticationOptions>();
+await using (var scope = app.Services.CreateAsyncScope())
+    await scope.ServiceProvider.GetRequiredService<IamDatabaseInitializer>().InitializeAsync();
 app.UseMiddleware<CorrelationMiddleware>();
 app.UseMiddleware<SafeExceptionMiddleware>();
 app.Use(async (context, next) =>
@@ -109,26 +113,35 @@ app.MapGet("/health/ready", (GarageWatch.Infrastructure.Capture.CaptureWorker ca
     };
     return Results.Json(response, statusCode: ready ? StatusCodes.Status200OK : StatusCodes.Status503ServiceUnavailable);
 }).RequireAuthorization("Administrator");
-app.MapPost("/api/v1/auth/login", async (LoginRequest request, LocalAuthenticationOptions credentials,
-    HttpContext context) =>
+app.MapPost("/api/v1/auth/login", async (LoginRequest request, UserManager<ApplicationUser> users,
+    SignInManager<ApplicationUser> signInManager) =>
 {
-    if (request.Username?.Length > 64 || request.Password?.Length > 256 ||
-        !credentials.Verify(request.Username, request.Password))
+    if (string.IsNullOrWhiteSpace(request.Username) || request.Username.Length > 64 ||
+        string.IsNullOrEmpty(request.Password) || request.Password.Length > 256)
         return Results.Unauthorized();
-    var claims = new[] { new Claim(ClaimTypes.Name, credentials.Username), new Claim(ClaimTypes.Role, credentials.Role) };
-    await context.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme,
-        new ClaimsPrincipal(new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme)));
+    var account = await users.FindByNameAsync(request.Username);
+    if (account is null || !account.IsActive) return Results.Unauthorized();
+    var result = await signInManager.PasswordSignInAsync(request.Username, request.Password,
+        isPersistent: false, lockoutOnFailure: true);
+    if (!result.Succeeded) return Results.Unauthorized();
     return Results.NoContent();
 }).AllowAnonymous().RequireRateLimiting("login");
 app.MapPost("/api/v1/auth/logout", async (HttpContext context) =>
 {
-    await context.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+    await context.SignOutAsync(IdentityConstants.ApplicationScheme);
     return Results.NoContent();
-}).RequireAuthorization("Viewer");
+}).RequireAuthorization();
 app.MapGet("/api/v1/auth/session", (ClaimsPrincipal user) =>
     Results.Ok(new { authenticated = user.Identity?.IsAuthenticated == true })).AllowAnonymous();
-app.MapGet("/api/v1/auth/me", (ClaimsPrincipal user) => Results.Ok(new AuthenticatedUser(
-    user.Identity?.Name ?? "", user.FindFirstValue(ClaimTypes.Role) ?? "Viewer"))).RequireAuthorization("Viewer");
+app.MapGet("/api/v1/auth/me", async (ClaimsPrincipal principal, UserManager<ApplicationUser> users) =>
+{
+    var user = await users.GetUserAsync(principal);
+    if (user is null || !user.IsActive) return Results.Unauthorized();
+    var roles = await users.GetRolesAsync(user);
+    var primaryRole = roles.Contains("Administrator", StringComparer.Ordinal) ? "Administrator"
+        : roles.Contains("Viewer", StringComparer.Ordinal) ? "Viewer" : "User";
+    return Results.Ok(new AuthenticatedUser(user.UserName ?? "", primaryRole));
+}).RequireAuthorization();
 app.MapPut("/api/v1/clients/presence", (ClientPresenceHeartbeat request, ClientPresenceRegistry registry) =>
 {
     if (request.ClientId == Guid.Empty) return Results.BadRequest(new { code = "invalid_client_id" });

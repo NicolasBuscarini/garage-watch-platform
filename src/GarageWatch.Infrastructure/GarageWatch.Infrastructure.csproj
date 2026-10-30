@@ -1,5 +1,11 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Identity.EntityFrameworkCore" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" />
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <ProjectReference Include="../GarageWatch.Application/GarageWatch.Application.csproj" />
     <ProjectReference Include="../GarageWatch.Domain/GarageWatch.Domain.csproj" />

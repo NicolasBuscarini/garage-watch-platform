@@ -27,9 +27,10 @@ services:
       CAPTURE_RTSP_URL: "${CAPTURE_RTSP_URL:-}"
       CAPTURE_FFMPEG_PATH: "${CAPTURE_FFMPEG_PATH:-ffmpeg}"
       CAPTURE_FFPROBE_PATH: "${CAPTURE_FFPROBE_PATH:-ffprobe}"
+      IDENTITY_DB_PATH: "${IDENTITY_DB_PATH:-/data/identity/garagewatch.db}"
       AUTH_USERNAME: "${AUTH_USERNAME:-}"
       AUTH_PASSWORD: "${AUTH_PASSWORD:-}"
-      AUTH_ROLE: "${AUTH_ROLE:-Viewer}"
+      AUTH_EMAIL: "${AUTH_EMAIL:-}"
     ports:
       - "127.0.0.1:${APP_PORT:-8081}:8080"
     tmpfs:
@@ -165,9 +166,10 @@ services:
       CAPTURE_RTSP_URL: rtsp://rtsp-test-server:8554/garage
       CAPTURE_FFMPEG_PATH: ffmpeg
       CAPTURE_FFPROBE_PATH: ffprobe
+      IDENTITY_DB_PATH: "/tmp/identity-${RTSP_CONTRACT_RUN_ID:-manual}.db"
       AUTH_USERNAME: "${AUTH_USERNAME:-}"
       AUTH_PASSWORD: "${AUTH_PASSWORD:-}"
-      AUTH_ROLE: "${AUTH_ROLE:-Viewer}"
+      AUTH_EMAIL: "${AUTH_EMAIL:-}"
     ports:
       - "127.0.0.1:${RTSP_CONTRACT_PORT:-8082}:8080"
     tmpfs:

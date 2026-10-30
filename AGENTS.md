@@ -9,6 +9,8 @@
 
 ## Engenharia
 - .NET 10/C# e Docker Compose são a base inicial conforme contexto; imagem, pacotes e ferramentas devem ser fixados e documentados.
+- Preserve os padrões e arquitetura existentes e use práticas atuais e suportadas do ecossistema .NET; mudanças coesas e revisáveis, sem framework/dependência por moda ou abstração especulativa. UI/UX é comportamento: acessibilidade, teclado/foco, responsividade, estados claros de vazio/carregamento/erro/sucesso e confirmação para ações destrutivas.
+- Antes de assumir decisão material de arquitetura, persistência, segurança, produto ou UX, investigue código/docs, recomende uma opção com trade-offs e pergunte ao operador. Para detalhe reversível de baixo risco, documente default sensato e prossiga.
 - Manter Domain/Application independentes de HTTP, persistência e SDKs de fornecedor. Introduzir portas somente em fronteiras concretas.
 - Configuração por variáveis de ambiente; exemplos sem segredos. Nunca versionar `.env`, mídia, embeddings, logs sensíveis ou dados locais.
 - Testes devem exercitar contratos e fluxo real interno; adaptadores fake somente nas fronteiras externas.

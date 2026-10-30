@@ -16,7 +16,7 @@ public sealed class ClientPresenceTests
         Assert.Equal(HttpStatusCode.Unauthorized, denied.StatusCode);
 
         using var login = await anonymous.PostAsJsonAsync("/api/v1/auth/login",
-            new { username = "contract-user", password = "contract-password-12345" });
+            new { username = "contract-user", password = "Contract-Password-123!" });
         Assert.Equal(HttpStatusCode.NoContent, login.StatusCode);
         var cookie = login.Headers.GetValues("Set-Cookie").Single().Split(';', 2)[0];
         using var sameAccount = factory.CreateClient(new() { AllowAutoRedirect = false });
