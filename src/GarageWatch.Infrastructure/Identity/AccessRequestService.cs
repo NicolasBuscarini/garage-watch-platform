@@ -3,7 +3,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace GarageWatch.Infrastructure.Identity;
 
-public sealed record AccessRequestSummary(Guid Id, string Username, string Purpose, string Status,
+public sealed record AccessRequestSummary(Guid Id, Guid UserId, string Username, string Purpose, string Status,
     DateTimeOffset CreatedAtUtc);
 
 public sealed record AccessRequestPage(IReadOnlyList<AccessRequestSummary> Items, int Page, int PageSize,
@@ -73,7 +73,7 @@ public sealed class AccessRequestService(IamDbContext database, IIamUnitOfWork u
         var totalCount = await query.CountAsync(cancellationToken);
         var items = await query.OrderByDescending(item => item.CreatedAtUtc).ThenBy(item => item.Id)
             .Skip((page - 1) * pageSize).Take(pageSize)
-            .Select(item => new AccessRequestSummary(item.Id, item.User!.UserName!, item.Purpose,
+            .Select(item => new AccessRequestSummary(item.Id, item.UserId, item.User!.UserName!, item.Purpose,
                 item.Status, item.CreatedAtUtc))
             .ToArrayAsync(cancellationToken);
         return new AccessRequestPage(items, page, pageSize, totalCount);

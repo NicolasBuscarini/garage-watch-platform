@@ -164,6 +164,21 @@ public sealed class IamTests
         Assert.Equal(2, pageBody.GetProperty("totalCount").GetInt32());
         Assert.DoesNotContain("private@example.invalid", await page.Content.ReadAsStringAsync());
 
+        using var filteredPage = await admin.GetAsync(
+            $"/api/v1/admin/users?userId={viewerId}&page=1&pageSize=1");
+        Assert.Equal(System.Net.HttpStatusCode.OK, filteredPage.StatusCode);
+        var filteredBody = await filteredPage.Content.ReadFromJsonAsync<JsonElement>();
+        var filteredUser = Assert.Single(filteredBody.GetProperty("items").EnumerateArray());
+        Assert.Equal(viewerId, filteredUser.GetProperty("id").GetGuid());
+        Assert.Equal("admin-api-viewer", filteredUser.GetProperty("userName").GetString());
+        Assert.Equal(1, filteredBody.GetProperty("totalCount").GetInt32());
+
+        using var filteredPastEnd = await admin.GetAsync(
+            $"/api/v1/admin/users?userId={viewerId}&page=2&pageSize=1");
+        var filteredPastEndBody = await filteredPastEnd.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Empty(filteredPastEndBody.GetProperty("items").EnumerateArray());
+        Assert.Equal(1, filteredPastEndBody.GetProperty("totalCount").GetInt32());
+
         using var detail = await admin.GetAsync($"/api/v1/admin/users/{viewerId}");
         Assert.Equal(System.Net.HttpStatusCode.OK, detail.StatusCode);
         Assert.DoesNotContain("private@example.invalid", await detail.Content.ReadAsStringAsync());
