@@ -159,6 +159,11 @@ public sealed class SystemProfileEndpointTests
             Assert.Equal("reconnecting", body.RootElement.GetProperty("capture").GetProperty("state").GetString());
             Assert.Equal("capture_source_unavailable", body.RootElement.GetProperty("capture").GetProperty("lastErrorCode").GetString());
         }
+
+        using var cameraStatus = await client.GetAsync("/api/v1/cameras");
+        using var cameras = JsonDocument.Parse(await cameraStatus.Content.ReadAsStringAsync());
+        Assert.Equal("reconnecting", cameras.RootElement[0].GetProperty("status").GetString());
+        Assert.Equal(JsonValueKind.Null, cameras.RootElement[0].GetProperty("streamEpoch").ValueKind);
     }
 
     [Fact]

@@ -47,8 +47,44 @@
           <input id="password" class="form-control" name="password" type="password" autocomplete="current-password" required maxlength="256">
         </div>
         <button class="btn btn-primary w-100" type="submit">Entrar</button>
+        <button id="show-register" class="btn btn-link w-100 mt-2" type="button">Criar conta local</button>
         <p id="login-error" class="feedback error-text mt-3 mb-0" role="status" aria-live="polite"></p>
+        <p id="login-message" class="feedback mt-2 mb-0" role="status" aria-live="polite"></p>
       </form>
+    </section>
+
+    <section id="register" class="panel-card login-panel mx-auto hidden" aria-labelledby="register-title">
+      <div class="login-heading mb-4">
+        <span class="eyebrow">CONTA LOCAL</span>
+        <h2 id="register-title" class="h4 mt-2 mb-2">Criar conta</h2>
+        <p class="text-secondary mb-0">A conta começa sem acesso a câmeras. Este cadastro local não verifica e-mail e não oferece recuperação de senha.</p>
+      </div>
+      <form id="register-form">
+        <div class="mb-3">
+          <label class="form-label" for="register-username">Usuário</label>
+          <input id="register-username" class="form-control" name="username" autocomplete="username" required minlength="3" maxlength="64" pattern="[A-Za-z0-9._@+-]+" aria-describedby="register-username-help">
+          <div id="register-username-help" class="form-text">3–64 caracteres: letras, números, ponto, hífen, sublinhado, @ ou +.</div>
+        </div>
+        <div class="mb-3">
+          <label class="form-label" for="register-password">Senha</label>
+          <input id="register-password" class="form-control" name="password" type="password" autocomplete="new-password" required minlength="12" maxlength="256" aria-describedby="register-password-help">
+          <div id="register-password-help" class="form-text">Mínimo de 12 caracteres, com maiúscula, minúscula, número e símbolo.</div>
+        </div>
+        <div class="mb-3">
+          <label class="form-label" for="register-confirm-password">Confirmar senha</label>
+          <input id="register-confirm-password" class="form-control" name="confirmPassword" type="password" autocomplete="new-password" required minlength="12" maxlength="256">
+        </div>
+        <button class="btn btn-primary w-100" type="submit">Criar conta</button>
+        <button id="show-login" class="btn btn-link w-100 mt-2" type="button">Voltar para entrar</button>
+        <p id="register-message" class="feedback mt-3 mb-0" role="status" aria-live="polite"></p>
+      </form>
+    </section>
+
+    <section id="user-landing" class="panel-card mx-auto hidden" aria-labelledby="user-landing-title" tabindex="-1">
+      <span class="eyebrow">CONTA LOCAL</span>
+      <h2 id="user-landing-title" class="h4 mt-2">Conta ativa</h2>
+      <p>Seu papel é <strong>User</strong>. Nenhuma câmera foi concedida a esta conta, então o monitoramento não está disponível.</p>
+      <p class="text-secondary mb-0">Solicitação de acesso e recuperação de senha ainda não estão disponíveis neste perfil local.</p>
     </section>
 
     <section id="dashboard" class="hidden" aria-label="Estado da garagem">
@@ -82,6 +118,7 @@
         <div class="player-shell">
           <div class="player-frame">
             <video id="live" class="live-video" playsinline preload="none" aria-label="Vídeo ao vivo da câmera"></video>
+            <div id="camera-availability" class="camera-availability hidden" role="status" aria-live="polite" aria-atomic="true"></div>
           </div>
           <div class="player-toolbar" aria-label="Controles do player">
           <button id="player-toggle" class="btn-player" type="button" aria-label="Reproduzir vídeo" disabled>
@@ -253,6 +290,6 @@
     <p id="message" class="feedback error-text mt-3" role="status" aria-live="polite"></p>
   </main>
   <script src="/vendor/hls.min.js" defer></script>
-  <script src="/app.js?v=modules-1" type="module"></script>
+  <script src="/app.js?v=modules-3" type="module"></script>
 </body>
 </html>

@@ -40,6 +40,7 @@ export function captureLabel(state) {
 export function captureErrorLabel(code) {
   return ({
     capture_source_unavailable: 'Fonte sem resposta; nova tentativa agendada.',
+    capture_segment_timeout: 'Nenhum segmento novo no prazo; captura reiniciando a conexão.',
     capture_codec_unsupported: 'Formato de vídeo não aceito pelo adaptador.',
     capture_audio_unsupported: 'Formato de áudio não aceito pelo adaptador.',
     capture_segment_size_limit: 'Segmento excedeu o limite configurado.',

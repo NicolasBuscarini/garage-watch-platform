@@ -264,6 +264,7 @@ button, input { font: inherit; }
 .client-count svg { width: 18px; height: 18px; color: var(--accent); }
 .client-count-label { color: var(--text-muted); }
 .player-frame {
+  position: relative;
   overflow: hidden;
   padding: 3px;
   background: linear-gradient(135deg, #334940, #101615 50%, #26372f);
@@ -272,6 +273,21 @@ button, input { font: inherit; }
   box-shadow: 0 18px 48px #00000038;
 }
 .live-video { border: 0; border-radius: .75rem; }
+.camera-availability {
+  position: absolute;
+  inset: 4px;
+  display: grid;
+  place-content: center;
+  padding: 1.25rem;
+  color: #fff1ed;
+  background: #171b1add;
+  border: 1px solid #a85d51;
+  border-radius: .8rem;
+  text-align: center;
+  font-weight: 700;
+}
+.camera-availability.pending { color: #f2ead5; border-color: #9a8245; }
+.camera-availability.healthy { display: none; }
 .player-toolbar {
   display: flex;
   flex-wrap: wrap;

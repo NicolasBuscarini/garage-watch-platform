@@ -12,8 +12,13 @@ public sealed record CaptureOptions(
     string? RtspUrl,
     string FfmpegPath,
     string FfprobePath,
-    bool AudioEnabled = false)
+    bool AudioEnabled = false,
+    int SegmentTimeoutSeconds = 0)
 {
+    public int EffectiveSegmentTimeoutSeconds => SegmentTimeoutSeconds > 0
+        ? SegmentTimeoutSeconds
+        : Math.Max(15, SegmentSeconds * 3 + 5);
+
     public static CaptureOptions FromEnvironment(IConfiguration configuration)
     {
         var profile = configuration["CAPTURE_PROFILE"] ?? "synthetic";
@@ -29,6 +34,10 @@ public sealed record CaptureOptions(
         }
 
         var segmentSeconds = ParseBounded(configuration["CAPTURE_SEGMENT_SECONDS"], 5, 1, 60, "CAPTURE_SEGMENT_SECONDS");
+        var segmentTimeoutSeconds = ParseBounded(configuration["CAPTURE_SEGMENT_TIMEOUT_SECONDS"], 0, 0, 300,
+            "CAPTURE_SEGMENT_TIMEOUT_SECONDS");
+        if (segmentTimeoutSeconds > 0 && segmentTimeoutSeconds <= segmentSeconds)
+            throw new InvalidOperationException("CAPTURE_SEGMENT_TIMEOUT_SECONDS deve ser maior que CAPTURE_SEGMENT_SECONDS.");
         var maximumSegments = ParseBounded(configuration["CAPTURE_MAX_SEGMENTS"], 120, 1, 10_000, "CAPTURE_MAX_SEGMENTS");
         var maximumSegmentBytes = ParseLongBounded(configuration["CAPTURE_MAX_SEGMENT_BYTES"], 67_108_864, 1_048_576, 1_073_741_824, "CAPTURE_MAX_SEGMENT_BYTES");
         var spoolDirectory = configuration["CAPTURE_SPOOL_DIRECTORY"] ?? "/data/capture";
@@ -64,7 +73,7 @@ public sealed record CaptureOptions(
 
         return new CaptureOptions(profile, cameraId, spoolDirectory, segmentSeconds, maximumSegments, maximumSegmentBytes, rtspUrl,
             configuration["CAPTURE_FFMPEG_PATH"] ?? "ffmpeg",
-            configuration["CAPTURE_FFPROBE_PATH"] ?? "ffprobe", audioEnabled);
+            configuration["CAPTURE_FFPROBE_PATH"] ?? "ffprobe", audioEnabled, segmentTimeoutSeconds);
     }
 
     private static int ParseBounded(string? raw, int fallback, int minimum, int maximum, string name)

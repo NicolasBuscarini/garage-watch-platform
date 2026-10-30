@@ -17,6 +17,7 @@ public sealed class CaptureWorker(
     private static readonly Counter<long> SegmentBytes = Meter.CreateCounter<long>("garagewatch.capture.segment.bytes", unit: "By");
     private static readonly Histogram<double> SegmentDuration = Meter.CreateHistogram<double>("garagewatch.capture.segment.duration", unit: "s");
     private static readonly Counter<long> Gaps = Meter.CreateCounter<long>("garagewatch.capture.gaps");
+    private static readonly Counter<long> Reconnects = Meter.CreateCounter<long>("garagewatch.capture.reconnects");
     private readonly object _gate = new();
     private CaptureStatus _status = new(adapter.Name, adapter.Version, adapter.Capabilities, "starting", null, 0, 0, null);
 
@@ -47,10 +48,13 @@ public sealed class CaptureWorker(
         {
             var epoch = Guid.NewGuid().ToString();
             var workDirectory = Path.Combine(options.SpoolDirectory, "work", epoch);
-            Update("connecting", epoch, null);
+            if (failures == 0) Update("connecting", null, null);
             try
             {
-                await foreach (var segment in adapter.CaptureAsync(workDirectory, stoppingToken))
+                await ConsumeAttemptAsync(workDirectory, stoppingToken, OnSegmentAsync);
+                if (!stoppingToken.IsCancellationRequested) throw new InvalidOperationException("capture_stream_ended");
+
+                async Task OnSegmentAsync(CapturedSegment segment)
                 {
                     var manifest = await spool.StoreAsync(segment, epoch, stoppingToken);
                     File.Delete(segment.SourcePath);
@@ -64,7 +68,6 @@ public sealed class CaptureWorker(
                     logger.LogInformation("Segmento de captura confirmado: {SegmentId}, {SizeBytes} bytes", manifest.SegmentId, manifest.SizeBytes);
                     UpdateRetainedSegments(EnforceRetention());
                 }
-                if (!stoppingToken.IsCancellationRequested) throw new InvalidOperationException("capture_stream_ended");
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }
             catch (Exception exception)
@@ -87,7 +90,9 @@ public sealed class CaptureWorker(
                     }
                 }
                 if (stoppingToken.IsCancellationRequested) break;
-                var errorCode = exception is InvalidDataException { Message: "capture_codec_unsupported" }
+                var errorCode = exception is TimeoutException { Message: "capture_segment_timeout" }
+                    ? "capture_segment_timeout"
+                    : exception is InvalidDataException { Message: "capture_codec_unsupported" }
                     ? "capture_codec_unsupported"
                     : exception is InvalidDataException { Message: "capture_audio_unsupported" }
                         ? "capture_audio_unsupported"
@@ -97,12 +102,40 @@ public sealed class CaptureWorker(
                 Update("reconnecting", null, errorCode);
                 UpdateRetainedGaps(spool.CountGaps());
                 Gaps.Add(1, CreateMetricTags("gap"));
+                Reconnects.Add(1, CreateMetricTags("retry"));
                 logger.LogWarning("Fonte de captura indisponível; nova tentativa limitada, motivo={FailureType}", exception.GetType().Name);
                 await Task.Delay(TimeSpan.FromSeconds(Math.Min(30, 1 << (failures - 1))), stoppingToken);
             }
             finally { TryDeleteDirectory(workDirectory); }
         }
         Update("stopped", null, null);
+    }
+
+    private async Task ConsumeAttemptAsync(string workDirectory, CancellationToken stoppingToken,
+        Func<CapturedSegment, Task> onSegment)
+    {
+        using var attemptCancellation = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+        await using var enumerator = adapter.CaptureAsync(workDirectory, attemptCancellation.Token)
+            .GetAsyncEnumerator(attemptCancellation.Token);
+        while (true)
+        {
+            var moveNext = enumerator.MoveNextAsync().AsTask();
+            bool hasNext;
+            try
+            {
+                hasNext = await moveNext.WaitAsync(TimeSpan.FromSeconds(options.EffectiveSegmentTimeoutSeconds), stoppingToken);
+            }
+            catch (TimeoutException)
+            {
+                attemptCancellation.Cancel();
+                try { await moveNext; }
+                catch (OperationCanceledException) when (attemptCancellation.IsCancellationRequested) { }
+                throw new TimeoutException("capture_segment_timeout");
+            }
+
+            if (!hasNext) return;
+            await onSegment(enumerator.Current);
+        }
     }
 
     private int EnforceRetention()

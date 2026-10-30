@@ -54,12 +54,22 @@ builder.Services.AddAuthorization(options =>
     options.AddPolicy("Viewer", policy => policy.RequireRole("Viewer", "Administrator"));
     options.AddPolicy("Administrator", policy => policy.RequireRole("Administrator"));
 });
-builder.Services.AddRateLimiter(options => options.AddFixedWindowLimiter("login", limiter =>
+builder.Services.AddRateLimiter(options =>
 {
-    limiter.PermitLimit = 5;
-    limiter.Window = TimeSpan.FromMinutes(1);
-    limiter.QueueLimit = 0;
-}));
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.AddFixedWindowLimiter("login", limiter =>
+    {
+        limiter.PermitLimit = 5;
+        limiter.Window = TimeSpan.FromMinutes(1);
+        limiter.QueueLimit = 0;
+    });
+    options.AddFixedWindowLimiter("registration", limiter =>
+    {
+        limiter.PermitLimit = 3;
+        limiter.Window = TimeSpan.FromMinutes(1);
+        limiter.QueueLimit = 0;
+    });
+});
 builder.Services.AddPlatformObservability(builder.Configuration, builder.Environment);
 builder.Services.AddMediatR(configuration =>
 {
@@ -120,12 +130,26 @@ app.MapPost("/api/v1/auth/login", async (LoginRequest request, UserManager<Appli
         string.IsNullOrEmpty(request.Password) || request.Password.Length > 256)
         return Results.Unauthorized();
     var account = await users.FindByNameAsync(request.Username);
-    if (account is null || !account.IsActive) return Results.Unauthorized();
+    if (account is null || !account.IsActive)
+    {
+        _ = users.PasswordHasher.HashPassword(new ApplicationUser(), request.Password);
+        return Results.Unauthorized();
+    }
     var result = await signInManager.PasswordSignInAsync(request.Username, request.Password,
         isPersistent: false, lockoutOnFailure: true);
     if (!result.Succeeded) return Results.Unauthorized();
     return Results.NoContent();
 }).AllowAnonymous().RequireRateLimiting("login");
+app.MapPost("/api/v1/auth/register", async (RegisterRequest request, HttpContext context,
+    IdentityRegistrationService registration, CancellationToken cancellationToken) =>
+{
+    if (!IsSameOrigin(context)) return Results.StatusCode(StatusCodes.Status403Forbidden);
+    var outcome = await registration.RegisterAsync(request.Username, request.Password,
+        request.ConfirmPassword, cancellationToken);
+    return outcome == RegistrationOutcome.InvalidInput
+        ? Results.BadRequest(new { code = "invalid_registration" })
+        : Results.Accepted();
+}).AllowAnonymous().RequireRateLimiting("registration");
 app.MapPost("/api/v1/auth/logout", async (HttpContext context) =>
 {
     await context.SignOutAsync(IdentityConstants.ApplicationScheme);
@@ -155,6 +179,7 @@ app.MapGet("/api/v1/cameras", (GarageWatch.Infrastructure.Capture.CaptureOptions
     {
         cameraId = captureOptions.CameraId,
         status = capture.Status.State,
+        streamEpoch = capture.Status.StreamEpoch,
         liveUrl = $"/api/v1/live/{captureOptions.CameraId}/index.m3u8"
     }
 })).RequireAuthorization("Viewer");
@@ -203,6 +228,21 @@ app.MapGet("/api/v1/system-profile", async (
         profile.Environment,
         profile.ApplicationVersion));
 }).RequireAuthorization("Administrator");
+
+static bool IsSameOrigin(HttpContext context)
+{
+    var origin = context.Request.Headers["Origin"].ToString();
+    if (!Uri.TryCreate(origin, UriKind.Absolute, out var suppliedOrigin) ||
+        !string.IsNullOrEmpty(suppliedOrigin.UserInfo) || suppliedOrigin.AbsolutePath != "/" ||
+        !string.IsNullOrEmpty(suppliedOrigin.Query) || !string.IsNullOrEmpty(suppliedOrigin.Fragment))
+        return false;
+
+    var requestOriginText = $"{context.Request.Scheme}://{context.Request.Host}";
+    return Uri.TryCreate(requestOriginText, UriKind.Absolute, out var requestOrigin) &&
+        suppliedOrigin.IsLoopback && requestOrigin.IsLoopback &&
+        string.Equals(suppliedOrigin.GetLeftPart(UriPartial.Authority),
+            requestOrigin.GetLeftPart(UriPartial.Authority), StringComparison.OrdinalIgnoreCase);
+}
 
 app.Run();
 

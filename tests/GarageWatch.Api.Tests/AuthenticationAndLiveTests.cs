@@ -61,6 +61,8 @@ public sealed class AuthenticationAndLiveTests
         Assert.Contains("for=\"username\"", html, StringComparison.Ordinal);
         Assert.Contains("for=\"password\"", html, StringComparison.Ordinal);
         Assert.Contains("aria-label=\"Vídeo ao vivo da câmera\"", html, StringComparison.Ordinal);
+        Assert.Contains("id=\"camera-availability\"", html, StringComparison.Ordinal);
+        Assert.Contains("aria-live=\"polite\" aria-atomic=\"true\"", html, StringComparison.Ordinal);
         Assert.Contains("aria-label=\"Servidores e conexões\"", html, StringComparison.Ordinal);
         Assert.Contains("Não configurados", html, StringComparison.Ordinal);
         Assert.Contains("id=\"api-health\"", html, StringComparison.Ordinal);
@@ -78,7 +80,9 @@ public sealed class AuthenticationAndLiveTests
         Assert.Equal(1, CountOccurrences(html, "id=\"spool-limit\""));
         Assert.Contains("retidos no spool local<span id=\"spool-limit-container\"", html, StringComparison.Ordinal);
         Assert.DoesNotContain("Limite do spool:", html, StringComparison.Ordinal);
-        Assert.Contains("/app.js?v=modules-1\" type=\"module\"", html, StringComparison.Ordinal);
+        Assert.Contains("/app.js?v=modules-3\" type=\"module\"", html, StringComparison.Ordinal);
+        Assert.Contains("id=\"register-form\"", html, StringComparison.Ordinal);
+        Assert.Contains("id=\"user-landing\"", html, StringComparison.Ordinal);
         Assert.Contains("id=\"player-toggle\"", html, StringComparison.Ordinal);
         Assert.Contains("id=\"player-sync\"", html, StringComparison.Ordinal);
         var cameraSection = html.IndexOf("CÂMERA ATIVA", StringComparison.Ordinal);
@@ -102,11 +106,14 @@ public sealed class AuthenticationAndLiveTests
         Assert.Contains("@media (max-width: 575.98px)", appCss, StringComparison.Ordinal);
         using var favicon = await anonymous.GetAsync("/favicon.svg");
         Assert.Equal(HttpStatusCode.OK, favicon.StatusCode);
-        using var staticScript = await anonymous.GetAsync("/app.js?v=modules-1");
+        using var staticScript = await anonymous.GetAsync("/app.js?v=modules-3");
         Assert.Equal("no-store", staticScript.Headers.CacheControl?.ToString());
         var appScript = await anonymous.GetStringAsync("/app.js");
         Assert.Contains("from './js/navigation.js'", appScript, StringComparison.Ordinal);
         Assert.Contains("from './js/presence.js'", appScript, StringComparison.Ordinal);
+        Assert.Contains("/api/v1/auth/register", appScript, StringComparison.Ordinal);
+        Assert.Contains("currentRole === 'User'", appScript, StringComparison.Ordinal);
+        Assert.Contains("previousStreamEpoch !== camera.streamEpoch", appScript, StringComparison.Ordinal);
         var presenceScript = await anonymous.GetStringAsync("/js/presence.js");
         Assert.Contains("crypto.randomUUID", presenceScript, StringComparison.Ordinal);
         Assert.Contains("getRandomValues", presenceScript, StringComparison.Ordinal);
@@ -120,8 +127,12 @@ public sealed class AuthenticationAndLiveTests
         Assert.Contains("maxMaxBufferLength: 18", playerScript, StringComparison.Ordinal);
         Assert.Contains("xhr.withCredentials = true", playerScript, StringComparison.Ordinal);
         Assert.Contains("hls.liveSyncPosition", playerScript, StringComparison.Ordinal);
+        Assert.Contains("export function setCameraAvailability(state)", playerScript, StringComparison.Ordinal);
+        Assert.Contains("Câmera sem sinal. Tentando reconectar automaticamente", playerScript, StringComparison.Ordinal);
+        Assert.Contains("attachPlayer(url, forceRestart = false)", playerScript, StringComparison.Ordinal);
         Assert.Contains("video.seekable.end(range)", playerScript, StringComparison.Ordinal);
         Assert.Contains("video.currentTime = target", playerScript, StringComparison.Ordinal);
+        Assert.Contains("if (resumeAfterReconnect) void syncToLive()", playerScript, StringComparison.Ordinal);
         Assert.Contains("function seekTo(time)", playerScript, StringComparison.Ordinal);
         Assert.Contains("currentTime - 10", playerScript, StringComparison.Ordinal);
         Assert.Contains("currentTime + 10", playerScript, StringComparison.Ordinal);
@@ -136,7 +147,9 @@ public sealed class AuthenticationAndLiveTests
         Assert.Contains("classList.toggle('hidden', !hasSegmentLimit)", operationsScript, StringComparison.Ordinal);
         Assert.Contains("Number.isFinite(capture.segments) ? capture.segments : camera?.segments", operationsScript, StringComparison.Ordinal);
         Assert.Contains("Number.isFinite(capture.gaps) ? capture.gaps : camera?.gaps", operationsScript, StringComparison.Ordinal);
-        Assert.Contains("capture_source_unavailable", await anonymous.GetStringAsync("/js/api.js"), StringComparison.Ordinal);
+        var apiScript = await anonymous.GetStringAsync("/js/api.js");
+        Assert.Contains("capture_source_unavailable", apiScript, StringComparison.Ordinal);
+        Assert.Contains("capture_segment_timeout", apiScript, StringComparison.Ordinal);
         Assert.Contains("dataset.adminOnly === 'true'", await anonymous.GetStringAsync("/js/navigation.js"), StringComparison.Ordinal);
         Assert.Contains("Use os controles do painel para iniciar áudio e vídeo.", html, StringComparison.Ordinal);
         var player = await anonymous.GetByteArrayAsync("/vendor/hls.min.js");
@@ -171,6 +184,7 @@ public sealed class AuthenticationAndLiveTests
         Assert.False(cameraJson.RootElement[0].TryGetProperty("segments", out _));
         Assert.False(cameraJson.RootElement[0].TryGetProperty("gaps", out _));
         Assert.False(cameraJson.RootElement[0].TryGetProperty("adapter", out _));
+        Assert.True(cameraJson.RootElement[0].TryGetProperty("streamEpoch", out _));
         long initialSegmentCount = 0;
 
         using var liveness = await session.GetAsync("/health/live");

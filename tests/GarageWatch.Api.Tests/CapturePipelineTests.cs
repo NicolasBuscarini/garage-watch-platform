@@ -1,6 +1,7 @@
 using GarageWatch.Infrastructure.Capture;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
+using System.Text.Json;
 using Xunit;
 
 namespace GarageWatch.Api.Tests;
@@ -56,6 +57,60 @@ public sealed class CapturePipelineTests
         }).Build();
         Assert.Equal("CAPTURE_AUDIO_ENABLED deve ser true ou false.",
             Assert.Throws<InvalidOperationException>(() => CaptureOptions.FromEnvironment(invalidAudio)).Message);
+
+        var defaults = CaptureOptions.FromEnvironment(new ConfigurationBuilder().AddInMemoryCollection(
+            new Dictionary<string, string?> { ["CAPTURE_SEGMENT_SECONDS"] = "5" }).Build());
+        Assert.Equal(20, defaults.EffectiveSegmentTimeoutSeconds);
+        var invalidTimeout = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["CAPTURE_SEGMENT_SECONDS"] = "5",
+            ["CAPTURE_SEGMENT_TIMEOUT_SECONDS"] = "5"
+        }).Build();
+        Assert.Throws<InvalidOperationException>(() => CaptureOptions.FromEnvironment(invalidTimeout));
+    }
+
+    [Fact]
+    public async Task Worker_marks_stalled_source_unavailable_then_recovers_and_publishes_a_new_epoch()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "garagewatch-capture-tests", Guid.NewGuid().ToString("N"));
+        var options = new CaptureOptions("synthetic", "garage-01", root, 1, 4, 1_048_576, null, "ffmpeg", "ffprobe",
+            SegmentTimeoutSeconds: 1);
+        var adapter = new StallsOnceThenRecoversAdapter();
+        var worker = new CaptureWorker(options, adapter, new LocalSegmentSpool(options),
+            NullLogger<CaptureWorker>.Instance);
+        await worker.StartAsync(CancellationToken.None);
+        try
+        {
+            var reconnectDeadline = DateTime.UtcNow + TimeSpan.FromSeconds(3);
+            while ((worker.Status.State != "reconnecting" || worker.Status.LastErrorCode != "capture_segment_timeout")
+                   && DateTime.UtcNow < reconnectDeadline) await Task.Delay(10);
+            Assert.Equal("reconnecting", worker.Status.State);
+            Assert.Equal("capture_segment_timeout", worker.Status.LastErrorCode);
+
+            var manifestPath = await WaitForManifestAsync(Path.Combine(root, "manifests"), TimeSpan.FromSeconds(5));
+            var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(2);
+            while (worker.Status.State != "capturing" && DateTime.UtcNow < deadline) await Task.Delay(10);
+
+            Assert.Equal(2, adapter.Attempts);
+            Assert.Equal("capturing", worker.Status.State);
+            Assert.NotNull(worker.Status.StreamEpoch);
+            var manifest = JsonSerializer.Deserialize<SegmentManifestV1>(await File.ReadAllTextAsync(manifestPath), JsonOptions);
+            Assert.NotNull(manifest);
+            Assert.Equal(worker.Status.StreamEpoch, manifest.StreamEpoch);
+
+            var gapPath = Assert.Single(Directory.GetFiles(Path.Combine(root, "gaps"), "*.json"));
+            var gap = JsonSerializer.Deserialize<CaptureGapV1>(await File.ReadAllTextAsync(gapPath), JsonOptions);
+            Assert.NotNull(gap);
+            Assert.Null(gap.PreviousStreamEpoch);
+            Assert.Equal("capture_source_unavailable", gap.ReasonCode);
+            Assert.Equal(1, gap.RetryAttempt);
+        }
+        finally
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+            await worker.StopAsync(timeout.Token);
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
     }
 
     [Fact]
@@ -277,6 +332,33 @@ public sealed class CapturePipelineTests
             await Task.Yield();
             if (cancellationToken.IsCancellationRequested) yield break;
             throw new InvalidOperationException("contract_source_unavailable");
+        }
+    }
+
+    private sealed class StallsOnceThenRecoversAdapter : ISegmentCaptureAdapter
+    {
+        private int _attempts;
+        public int Attempts => Volatile.Read(ref _attempts);
+        public string Name => "contract-stalled-source";
+        public string Version => "1.0";
+        public IReadOnlyList<string> Capabilities => ["contract-test", "bounded-reconnect"];
+
+        public async IAsyncEnumerable<CapturedSegment> CaptureAsync(string workDirectory,
+            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
+        {
+            var attempt = Interlocked.Increment(ref _attempts);
+            if (attempt == 1)
+            {
+                await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+                yield break;
+            }
+
+            Directory.CreateDirectory(workDirectory);
+            var path = Path.Combine(workDirectory, "recovered.ts");
+            await File.WriteAllBytesAsync(path, [0x47, 0x01], cancellationToken);
+            var endedAt = DateTimeOffset.UtcNow;
+            yield return new CapturedSegment(path, endedAt.AddSeconds(-1), endedAt);
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
         }
     }
 

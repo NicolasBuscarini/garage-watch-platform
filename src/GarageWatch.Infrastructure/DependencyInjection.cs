@@ -34,7 +34,7 @@ public static class DependencyInjection
         });
         services.AddIdentityCore<ApplicationUser>(options =>
         {
-            options.User.RequireUniqueEmail = true;
+            options.User.RequireUniqueEmail = false;
             options.Password.RequiredLength = 12;
             options.Lockout.AllowedForNewUsers = true;
             options.Lockout.MaxFailedAccessAttempts = 5;
@@ -44,6 +44,7 @@ public static class DependencyInjection
             .AddEntityFrameworkStores<IamDbContext>()
             .AddSignInManager();
         services.AddScoped<IamDatabaseInitializer>();
+        services.AddScoped<IdentityRegistrationService>();
         services.AddScoped<IdentityAdministrationService>();
         services.AddSingleton<IamTransactionGate>();
         services.AddScoped<IIamUnitOfWork, IamUnitOfWork>();

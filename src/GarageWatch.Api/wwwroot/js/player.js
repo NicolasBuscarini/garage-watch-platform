@@ -128,11 +128,12 @@ export function detachPlayer() {
   updateSeekControls();
 }
 
-export function attachPlayer(url) {
-  if (url === currentUrl) return;
+export function attachPlayer(url, forceRestart = false) {
+  if (url === currentUrl && !forceRestart) return;
+  const video = $('live');
+  const resumeAfterReconnect = forceRestart && !video.paused && !video.ended;
   detachPlayer();
   currentUrl = url;
-  const video = $('live');
   video.dataset.url = url;
   $('player-toggle').disabled = false;
   $('player-sync').disabled = false;
@@ -156,6 +157,7 @@ export function attachPlayer(url) {
     hls.on(Hls.Events.MANIFEST_PARSED, () => {
       setPlayerState('Playlist recebida · pressione play', 'healthy');
       updateLiveSyncControl();
+      if (resumeAfterReconnect) void syncToLive();
     });
     hls.on(Hls.Events.ERROR, (_, data) => {
       if (!data.fatal) return;
@@ -170,12 +172,36 @@ export function attachPlayer(url) {
     });
   } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
     video.src = url;
+    if (resumeAfterReconnect)
+      video.addEventListener('loadedmetadata', () => void syncToLive(), { once: true });
   } else {
     for (const id of ['player-toggle', 'player-sync', 'player-backward', 'player-forward', 'player-seek',
       'player-mute', 'player-volume', 'player-fullscreen']) $(id).disabled = true;
     setPlayerState('Formato não suportado neste navegador', 'failed');
     $('live-message').textContent = 'Este navegador não oferece reprodução HLS/MSE compatível.';
   }
+}
+
+export function setCameraAvailability(state) {
+  const element = $('camera-availability');
+  const message = ({
+    starting: ['Iniciando a captura da câmera…', 'pending'],
+    connecting: ['Conectando à câmera…', 'pending'],
+    reconnecting: ['Câmera sem sinal. Tentando reconectar automaticamente…', 'degraded'],
+    'spool-unavailable': ['Captura temporariamente indisponível. Tentando recuperar o armazenamento local…', 'failed'],
+    stopped: ['Captura parada. O vídeo ao vivo está indisponível.', 'failed'],
+    unknown: ['Não foi possível confirmar o estado da câmera. Verifique a conexão com a plataforma.', 'failed']
+  })[state] || (state === 'capturing' ? undefined : ['Captura indisponível. O player será atualizado quando a fonte voltar.', 'failed']);
+  if (!message) {
+    element.textContent = '';
+    element.classList.add('hidden');
+    element.classList.remove('pending', 'degraded', 'failed');
+    return;
+  }
+  const [text, severity] = message;
+  if (element.textContent !== text) element.textContent = text;
+  element.classList.remove('hidden', 'pending', 'degraded', 'failed');
+  element.classList.add(severity);
 }
 
 export function setPlayerPending() {
