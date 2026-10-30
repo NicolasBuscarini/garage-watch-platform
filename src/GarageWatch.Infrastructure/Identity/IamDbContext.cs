@@ -25,6 +25,7 @@ public sealed class IamDbContext(DbContextOptions<IamDbContext> options)
     public DbSet<UserAccessProfileAssignment> UserAccessProfileAssignments => Set<UserAccessProfileAssignment>();
     public DbSet<UserAccessProfileScope> UserAccessProfileScopes => Set<UserAccessProfileScope>();
     public DbSet<IamMigrationState> IamMigrationStates => Set<IamMigrationState>();
+    public DbSet<AccessRequest> AccessRequests => Set<AccessRequest>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -136,6 +137,18 @@ public sealed class IamDbContext(DbContextOptions<IamDbContext> options)
             entity.HasKey(state => state.Key);
             entity.Property(state => state.Key).HasMaxLength(128);
             entity.Property(state => state.CompletedAtUtc).HasConversion(UtcTicksConverter);
+        });
+        builder.Entity<AccessRequest>(entity =>
+        {
+            entity.HasKey(request => request.Id);
+            entity.Property(request => request.Purpose).HasMaxLength(32).IsRequired();
+            entity.Property(request => request.Status).HasMaxLength(24).IsRequired();
+            entity.Property(request => request.CreatedAtUtc).HasConversion(UtcTicksConverter);
+            entity.HasIndex(request => new { request.UserId, request.IdempotencyKey }).IsUnique();
+            entity.HasIndex(request => request.UserId).IsUnique().HasFilter("\"Status\" = 'pending'");
+            entity.HasIndex(request => new { request.Status, request.CreatedAtUtc });
+            entity.HasOne(request => request.User).WithMany().HasForeignKey(request => request.UserId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
     }
 }

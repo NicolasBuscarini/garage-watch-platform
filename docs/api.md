@@ -21,6 +21,7 @@ Ambos existem somente nos ambientes ASP.NET Core Development/Testing e exigem co
 | Cameras | Câmeras visíveis na sessão |
 | Camera administration | CRUD lógico e paginação de contextos/câmeras |
 | User administration | Consulta de contas, atribuições a perfis/escopos e desativação Admin-only |
+| Access requests | Pedido autenticado User, consulta do próprio estado e listagem/revisão Admin-only |
 | Access profiles | Catálogo delegável, criação de perfis nomeados e publicação de versões imutáveis Admin-only |
 | Live video | Playlist HLS e segmentos com suporte Range, após autorização por câmera |
 | System | Perfil sanitizado do serviço |
@@ -28,3 +29,5 @@ Ambos existem somente nos ambientes ASP.NET Core Development/Testing e exigem co
 Cada operação publicada inclui operationId único, resumo/descrição, parâmetros/JSON body quando aplicável, schemas concretos e status de sucesso/erro. Respostas HLS declaram `application/vnd.apple.mpegurl` e `video/mp2t`; Range declara `206`. O schema reflete a API atualmente implementada, não significa que eventos/clipes/regras de IA já tenham endpoints.
 
 Gestão de acesso usa `GET /api/v1/admin/permission-catalog`, `GET/POST /api/v1/admin/access-rules`, `POST /api/v1/admin/access-rules/{profileId}/versions` e `PUT /api/v1/admin/users/{userId}/access-rules`. A conta recebe referências a versões de perfis e escopos de pares exatos `{contextId,cameraId}`; request de usuário não aceita permission keys. Administrator é reservado e não pode receber perfil. A migração mantém os grants legados e cria atribuições ao perfil somente-vídeo com o mesmo escopo; depois da migração, autorização efetiva consulta somente perfis. `live.audio.listen` não é delegável até existir rendition isolada de áudio no servidor.
+
+Pedidos locais de acesso usam `POST /api/v1/access-requests` com `{idempotencyKey,purpose}` (`live_monitoring` ou `camera_access`), `GET /api/v1/access-requests/mine`, `GET /api/v1/admin/access-requests` e `POST /api/v1/admin/access-requests/{requestId}/review`. O POST exige Origin same-origin, sessão de User e no máximo 3 tentativas/minuto por identidade; o SQLite guarda um pedido pendente por conta e a auditoria na mesma transação. Reenvio idempotente/de pedido pendente retorna o registro existente; payload divergente para a mesma chave retorna conflito. Marcar como revisado não concede acesso: o Admin deve atribuir perfil/escopo separadamente em Usuários. Sem provedor/endereço (P13/P21), nenhuma mensagem de e-mail é enviada; pedidos permanecem disponíveis na lista Admin.

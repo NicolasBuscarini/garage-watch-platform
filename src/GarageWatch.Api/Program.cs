@@ -12,6 +12,7 @@ using MediatR;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.RateLimiting;
+using System.Threading.RateLimiting;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -52,6 +53,7 @@ builder.Services.AddAuthorization(options =>
     // Legacy policy name retained during route migration; resource permissions are checked against profiles.
     options.AddPolicy("Viewer", policy => policy.RequireAuthenticatedUser());
     options.AddPolicy("Administrator", policy => policy.RequireRole("Administrator"));
+    options.AddPolicy("User", policy => policy.RequireRole("User"));
 });
 builder.Services.AddRateLimiter(options =>
 {
@@ -68,6 +70,15 @@ builder.Services.AddRateLimiter(options =>
         limiter.Window = TimeSpan.FromMinutes(1);
         limiter.QueueLimit = 0;
     });
+    options.AddPolicy("access-request", context => RateLimitPartition.GetFixedWindowLimiter(
+        context.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "anonymous",
+        _ => new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = 3,
+            Window = TimeSpan.FromMinutes(1),
+            QueueLimit = 0,
+            AutoReplenishment = true
+        }));
 });
 builder.Services.AddPlatformObservability(builder.Configuration, builder.Environment);
 OpenApiConfiguration.AddDocumentation(builder.Services, builder.Environment);
@@ -91,8 +102,8 @@ app.Use(async (context, next) =>
 });
 app.UseDefaultFiles();
 app.UseStaticFiles();
-app.UseRateLimiter();
 app.UseAuthentication();
+app.UseRateLimiter();
 app.UseDocumentation();
 app.UseAuthorization();
 app.MapPlatformEndpoints();

@@ -53,6 +53,7 @@ public static class DependencyInjection
         services.AddScoped<IdentityRegistrationService>();
         services.AddScoped<IdentityAdministrationService>();
         services.AddScoped<AccessProfileService>();
+        services.AddScoped<AccessRequestService>();
         services.AddScoped<ICameraCatalog, CameraCatalogService>();
         services.AddScoped<ICameraResourceAccess, CameraResourceAccessService>();
         services.AddSingleton<IPermissionEvaluator, PermissionEvaluator>();

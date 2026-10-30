@@ -10,6 +10,7 @@ public static class ApiEndpointRegistration
             new Authentication.LoginEndpoint(), new Authentication.RegisterEndpoint(),
             new Authentication.LogoutEndpoint(), new Authentication.SessionEndpoint(),
             new Authentication.MeEndpoint(), new Clients.HeartbeatEndpoint(),
+            new AccessRequests.CreateAccessRequestEndpoint(), new AccessRequests.GetMyAccessRequestEndpoint(),
             new Cameras.ListCamerasEndpoint(),
             new Admin.ListContextsEndpoint(), new Admin.CreateContextEndpoint(),
             new Admin.UpdateContextEndpoint(), new Admin.DeactivateContextEndpoint(),
@@ -19,6 +20,7 @@ public static class ApiEndpointRegistration
             new Admin.ListPermissionCatalogEndpoint(), new Admin.ListAccessProfilesEndpoint(),
             new Admin.CreateAccessProfileEndpoint(), new Admin.PublishAccessProfileVersionEndpoint(),
             new Admin.ReplaceUserAccessProfilesEndpoint(),
+            new Admin.ListAccessRequestsEndpoint(), new Admin.ReviewAccessRequestEndpoint(),
             new Live.GetPlaylistEndpoint(), new Live.GetSegmentEndpoint(),
             new System.GetSystemProfileEndpoint()
         ];
