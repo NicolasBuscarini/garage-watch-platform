@@ -189,7 +189,7 @@ $('register-form').addEventListener('submit', async event => {
     }
     $('register-message').className = 'feedback error-text mt-3 mb-0';
     $('register-message').textContent = response.status === 400
-      ? 'Confira o nome de usuário e os requisitos de senha.'
+      ? 'Confira o nome de usuário e informe uma senha com pelo menos 6 caracteres.'
       : response.status === 403
         ? 'O cadastro só pode ser enviado pela interface local.'
         : response.status === 429

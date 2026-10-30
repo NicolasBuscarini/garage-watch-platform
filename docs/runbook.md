@@ -10,7 +10,7 @@ chmod 600 .env
 mkdir -p data
 ```
 
-Edite `.env`: defina `APP_UID`/`APP_GID` com `id -u`/`id -g`, usuário inicial e senha exclusiva (`AUTH_PASSWORD`, mínimo 12 caracteres). Mantenha `CAPTURE_PROFILE=synthetic` para primeiro smoke. Credenciais bootstrap só valem quando `data/identity/garagewatch.db` está vazio; alterar o arquivo depois não redefine senha. Não versionar `.env` nem `data/`.
+Edite `.env`: defina `APP_UID`/`APP_GID` com `id -u`/`id -g`, usuário inicial e senha exclusiva (`AUTH_PASSWORD`, mínimo 6 caracteres; somente números é permitido). Essa política de conveniência vale apenas para loopback e reduz a resistência a adivinhação; não reutilize senha nem publique o serviço na LAN. Login tem rate limit e lockout, mas OTP/e-mail não está implementado e não é presumido como substituto. Mantenha `CAPTURE_PROFILE=synthetic` para primeiro smoke. Credenciais bootstrap só valem quando `data/identity/garagewatch.db` está vazio; alterar o arquivo depois não redefine senha. Não versionar `.env` nem `data/`.
 
 ```bash
 docker compose build

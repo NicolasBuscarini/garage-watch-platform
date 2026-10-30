@@ -152,6 +152,26 @@ public sealed class RegistrationTests
     }
 
     [Fact]
+    public async Task Registration_accepts_six_numeric_characters_and_rejects_five()
+    {
+        await using var factory = new ApiFactory();
+        using var client = factory.CreateClient();
+        SetSameOrigin(client);
+
+        using var tooShort = await client.PostAsJsonAsync("/api/v1/auth/register",
+            new { username = "five-digits", password = "12345", confirmPassword = "12345" });
+        Assert.Equal(HttpStatusCode.BadRequest, tooShort.StatusCode);
+
+        using var accepted = await client.PostAsJsonAsync("/api/v1/auth/register",
+            new { username = "six-digits", password = "123456", confirmPassword = "123456" });
+        Assert.Equal(HttpStatusCode.Accepted, accepted.StatusCode);
+
+        using var login = await client.PostAsJsonAsync("/api/v1/auth/login",
+            new { username = "six-digits", password = "123456" });
+        Assert.Equal(HttpStatusCode.NoContent, login.StatusCode);
+    }
+
+    [Fact]
     public async Task Registration_rate_limit_rejects_requests_after_three_attempts_per_minute()
     {
         await using var factory = new ApiFactory();

@@ -35,6 +35,18 @@ public sealed class IamTests
     }
 
     [Fact]
+    public async Task Bootstrap_accepts_six_numeric_characters_for_local_administrator()
+    {
+        await using var factory = new ApiFactory(bootstrapPassword: "123456");
+        using var client = factory.CreateClient();
+
+        using var login = await client.PostAsJsonAsync("/api/v1/auth/login",
+            new { username = "contract-user", password = "123456" });
+
+        Assert.Equal(System.Net.HttpStatusCode.NoContent, login.StatusCode);
+    }
+
+    [Fact]
     public async Task Database_and_bootstrapped_identity_survive_host_restart_without_reseeding()
     {
         var databasePath = Path.Combine(Path.GetTempPath(), "garagewatch-tests", $"{Guid.NewGuid():N}.db");

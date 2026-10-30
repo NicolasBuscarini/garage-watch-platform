@@ -25,8 +25,10 @@ public sealed class AuthenticationAndLiveTests
 
     [Theory]
     [InlineData("Valid-Password-123!", true)]
+    [InlineData("123456", true)]
+    [InlineData("12345", false)]
     [InlineData("short", false)]
-    [InlineData("replace-with-a-strong-password", false)]
+    [InlineData("replace-with-a-local-password-of-6-or-more-characters", false)]
     public void BootstrapPasswordMustMeetMinimumAndRejectExample(string password, bool accepted)
     {
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>

@@ -18,7 +18,7 @@ public sealed record IdentityBootstrapOptions(string? Username, string? Password
 
     public void ValidateForBootstrap()
     {
-        if (!IsConfigured || Username!.Length > 64 || Password!.Length < 12 || Password.Length > 256 ||
+        if (!IsConfigured || Username!.Length > 64 || Password!.Length < 6 || Password.Length > 256 ||
             Password.StartsWith("replace-with-", StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("Configuração de bootstrap IAM inválida; use credencial exclusiva de administrador.");
     }
