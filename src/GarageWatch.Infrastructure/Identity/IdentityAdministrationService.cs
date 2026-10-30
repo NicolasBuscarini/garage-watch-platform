@@ -1,5 +1,6 @@
 using GarageWatch.Application.Identity;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.EntityFrameworkCore;
 
 namespace GarageWatch.Infrastructure.Identity;
 
@@ -7,6 +8,7 @@ public sealed class IdentityAdministrationService(
     IIamUnitOfWork unitOfWork,
     ICameraAccessGrantRepository grants,
     IIamAuditEventRepository auditEvents,
+    IamDbContext database,
     UserManager<ApplicationUser> users,
     TimeProvider timeProvider)
 {
@@ -51,6 +53,16 @@ public sealed class IdentityAdministrationService(
         if (currentRoles.Contains("Administrator") && !await HasOtherAdministratorAsync(subjectUserId, token))
             throw new InvalidOperationException("Não é permitido desativar o último administrador ativo.");
 
+        var revokedAtUtc = timeProvider.GetUtcNow();
+        var activeGrants = await database.CameraAccessGrants
+            .Where(grant => grant.UserId == subjectUserId && grant.RevokedAtUtc == null)
+            .ToListAsync(token);
+        foreach (var grant in activeGrants)
+        {
+            grant.RevokedAtUtc = revokedAtUtc;
+            Record(actorUserId, subjectUserId, "camera.access.revoked", grant.CameraId);
+        }
+
         user.IsActive = false;
         var updated = await users.UpdateAsync(user);
         if (!updated.Succeeded) throw new InvalidOperationException("Não foi possível desativar a conta.");
@@ -67,6 +79,13 @@ public sealed class IdentityAdministrationService(
         var user = await users.FindByIdAsync(subjectUserId.ToString())
             ?? throw new KeyNotFoundException("Conta não encontrada.");
         if (!user.IsActive) throw new InvalidOperationException("Conta desativada.");
+
+        var camera = await database.CameraCatalog.AsNoTracking()
+            .Where(item => item.CameraId == cameraId && item.ContextId == contextId && item.IsEnabled)
+            .Join(database.CameraContexts.AsNoTracking().Where(item => item.IsEnabled),
+                item => item.ContextId, context => context.ContextId, (item, _) => item)
+            .SingleOrDefaultAsync(token);
+        if (camera is null) throw new InvalidOperationException("A câmera não está habilitada no catálogo.");
 
         if (await grants.FindActiveAsync(subjectUserId, cameraId, cancellationToken: token) is not null) return;
 

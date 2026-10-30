@@ -9,6 +9,7 @@ public sealed class IamDatabaseInitializer(
     UserManager<ApplicationUser> users,
     RoleManager<IdentityRole<Guid>> roles,
     IdentityBootstrapOptions bootstrap,
+    GarageWatch.Infrastructure.Capture.CaptureOptions captureOptions,
     TimeProvider timeProvider)
 {
     private static readonly string[] KnownRoles = ["User", "Viewer", "Administrator"];
@@ -75,6 +76,31 @@ public sealed class IamDatabaseInitializer(
                                       select user.Id).AnyAsync(cancellationToken);
         if (!hasAdministrator)
             throw new InvalidOperationException("O IAM não possui administrador ativo; restaure um backup válido ou execute recuperação operacional.");
+
+        if (!await database.CameraCatalog.AnyAsync(cancellationToken))
+        {
+            var context = new CameraContext
+            {
+                ContextId = "garage",
+                Name = "Garagem",
+                IsEnabled = true,
+                Version = 1,
+                CreatedAtUtc = timeProvider.GetUtcNow(),
+                UpdatedAtUtc = timeProvider.GetUtcNow()
+            };
+            database.CameraContexts.Add(context);
+            database.CameraCatalog.Add(new CameraCatalogEntry
+            {
+                CameraId = captureOptions.CameraId,
+                ContextId = context.ContextId,
+                Name = "Câmera da garagem",
+                IsEnabled = true,
+                Version = 1,
+                CreatedAtUtc = context.CreatedAtUtc,
+                UpdatedAtUtc = context.UpdatedAtUtc
+            });
+            await database.SaveChangesAsync(cancellationToken);
+        }
 
         await transaction.CommitAsync(cancellationToken);
     }

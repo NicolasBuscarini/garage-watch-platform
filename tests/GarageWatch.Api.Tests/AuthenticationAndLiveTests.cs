@@ -238,6 +238,10 @@ public sealed class AuthenticationAndLiveTests
             var created = await userManager.CreateAsync(viewer, "Viewer-Password-123!");
             Assert.True(created.Succeeded, string.Join(",", created.Errors.Select(error => error.Code)));
             Assert.True((await userManager.AddToRoleAsync(viewer, "Viewer")).Succeeded);
+            var administrator = (await userManager.FindByNameAsync("contract-user"))!;
+            var captureOptions = scope.ServiceProvider.GetRequiredService<GarageWatch.Infrastructure.Capture.CaptureOptions>();
+            await scope.ServiceProvider.GetRequiredService<IdentityAdministrationService>()
+                .GrantCameraAsync(administrator.Id, viewer.Id, "garage", captureOptions.CameraId);
         }
         using var login = await client.PostAsJsonAsync("/api/v1/auth/login",
             new { username = "viewer-user", password = "Viewer-Password-123!" });

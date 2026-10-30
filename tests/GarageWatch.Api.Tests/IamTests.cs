@@ -4,6 +4,7 @@ using System.Net.Http.Json;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using System.Text.Json;
 using Xunit;
 
 namespace GarageWatch.Api.Tests;
@@ -51,6 +52,7 @@ public sealed class IamTests
     {
         var databasePath = Path.Combine(Path.GetTempPath(), "garagewatch-tests", $"{Guid.NewGuid():N}.db");
         Guid administratorId;
+        string cameraId;
         await using (var firstFactory = new ApiFactory(databasePath: databasePath))
         {
             using var firstClient = firstFactory.CreateClient();
@@ -58,8 +60,9 @@ public sealed class IamTests
             var users = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
             var administrator = (await users.FindByNameAsync("contract-user"))!;
             administratorId = administrator.Id;
+            cameraId = scope.ServiceProvider.GetRequiredService<GarageWatch.Infrastructure.Capture.CaptureOptions>().CameraId;
             await scope.ServiceProvider.GetRequiredService<IdentityAdministrationService>()
-                .GrantCameraAsync(administratorId, administratorId, "garage", "garage-01");
+                .GrantCameraAsync(administratorId, administratorId, "garage", cameraId);
         }
 
         await using (var restartedFactory = new ApiFactory(databasePath: databasePath,
@@ -73,7 +76,7 @@ public sealed class IamTests
             Assert.NotNull(administrator);
             Assert.Equal("contract-user", administrator.UserName);
             Assert.Equal(2, await database.IamAuditEvents.CountAsync());
-            Assert.Equal("garage-01", (await database.CameraAccessGrants.SingleAsync()).CameraId);
+            Assert.Equal(cameraId, (await database.CameraAccessGrants.SingleAsync()).CameraId);
             Assert.Equal(2, await database.IamAuditEvents.OrderBy(entry => entry.OccurredAtUtc).CountAsync());
             Assert.Equal(System.Net.HttpStatusCode.NoContent, (await restartedClient.PostAsJsonAsync("/api/v1/auth/login",
                 new { username = "contract-user", password = "Contract-Password-123!" })).StatusCode);
@@ -90,6 +93,7 @@ public sealed class IamTests
         var database = scope.ServiceProvider.GetRequiredService<IamDbContext>();
         var administration = scope.ServiceProvider.GetRequiredService<IdentityAdministrationService>();
         var administrator = (await users.FindByNameAsync("contract-user"))!;
+        var cameraId = scope.ServiceProvider.GetRequiredService<GarageWatch.Infrastructure.Capture.CaptureOptions>().CameraId;
 
         await Assert.ThrowsAsync<InvalidOperationException>(() => administration.SetRolesAsync(
             administrator.Id, administrator.Id, ["Viewer"]));
@@ -106,16 +110,107 @@ public sealed class IamTests
         Assert.True((await users.CreateAsync(viewer, "Viewer-Password-123!")).Succeeded);
         Assert.True((await users.AddToRoleAsync(viewer, "Viewer")).Succeeded);
 
-        await administration.GrantCameraAsync(administrator.Id, viewer.Id, "garage", "garage-01");
-        await administration.GrantCameraAsync(administrator.Id, viewer.Id, "garage", "garage-01");
+        await administration.GrantCameraAsync(administrator.Id, viewer.Id, "garage", cameraId);
+        await administration.GrantCameraAsync(administrator.Id, viewer.Id, "garage", cameraId);
         Assert.Single(await database.CameraAccessGrants.Where(grant => grant.RevokedAtUtc == null).ToListAsync());
-        await administration.RevokeCameraAsync(administrator.Id, viewer.Id, "garage-01");
+        await administration.RevokeCameraAsync(administrator.Id, viewer.Id, cameraId);
         var grant = await database.CameraAccessGrants.SingleAsync();
         Assert.NotNull(grant.RevokedAtUtc);
         Assert.Contains(await database.IamAuditEvents.Select(entry => entry.Action).ToListAsync(),
             action => action == "camera.access.granted");
         Assert.Contains(await database.IamAuditEvents.Select(entry => entry.Action).ToListAsync(),
             action => action == "camera.access.revoked");
+    }
+
+    [Fact]
+    public async Task Admin_user_endpoints_are_protected_and_mutations_revoke_sessions_and_preserve_last_admin()
+    {
+        await using var factory = new ApiFactory();
+        using var anonymous = factory.CreateClient();
+        Assert.Equal(System.Net.HttpStatusCode.Unauthorized,
+            (await anonymous.GetAsync("/api/v1/admin/users")).StatusCode);
+
+        using var admin = factory.CreateClient();
+        using var login = await admin.PostAsJsonAsync("/api/v1/auth/login",
+            new { username = "contract-user", password = "Contract-Password-123!" });
+        Assert.Equal(System.Net.HttpStatusCode.NoContent, login.StatusCode);
+        admin.DefaultRequestHeaders.Add("Cookie", Assert.Single(login.Headers.GetValues("Set-Cookie")).Split(';', 2)[0]);
+        admin.DefaultRequestHeaders.Add("Origin", "http://localhost");
+
+        Guid viewerId;
+        Guid administratorId;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var users = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
+            administratorId = (await users.FindByNameAsync("contract-user"))!.Id;
+            var viewer = new ApplicationUser
+            {
+                Id = Guid.NewGuid(),
+                UserName = "admin-api-viewer",
+                Email = "private@example.invalid",
+                IsActive = true
+            };
+            Assert.True((await users.CreateAsync(viewer, "Viewer-Password-123!")).Succeeded);
+            Assert.True((await users.AddToRoleAsync(viewer, "User")).Succeeded);
+            viewerId = viewer.Id;
+        }
+
+        using var page = await admin.GetAsync("/api/v1/admin/users?page=1&pageSize=1");
+        Assert.Equal(System.Net.HttpStatusCode.OK, page.StatusCode);
+        var pageBody = await page.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(1, pageBody.GetProperty("items").GetArrayLength());
+        Assert.Equal(2, pageBody.GetProperty("totalCount").GetInt32());
+        Assert.DoesNotContain("private@example.invalid", await page.Content.ReadAsStringAsync());
+
+        using var detail = await admin.GetAsync($"/api/v1/admin/users/{viewerId}");
+        Assert.Equal(System.Net.HttpStatusCode.OK, detail.StatusCode);
+        Assert.DoesNotContain("private@example.invalid", await detail.Content.ReadAsStringAsync());
+        using var viewerClient = factory.CreateClient();
+        using var viewerLogin = await viewerClient.PostAsJsonAsync("/api/v1/auth/login",
+            new { username = "admin-api-viewer", password = "Viewer-Password-123!" });
+        Assert.Equal(System.Net.HttpStatusCode.NoContent, viewerLogin.StatusCode);
+        viewerClient.DefaultRequestHeaders.Add("Cookie", Assert.Single(viewerLogin.Headers.GetValues("Set-Cookie")).Split(';', 2)[0]);
+        Assert.Equal(System.Net.HttpStatusCode.Forbidden,
+            (await viewerClient.GetAsync("/api/v1/admin/users")).StatusCode);
+
+        using var staleOrigin = factory.CreateClient();
+        staleOrigin.DefaultRequestHeaders.Add("Cookie", Assert.Single(login.Headers.GetValues("Set-Cookie")).Split(';', 2)[0]);
+        using var csrfDenied = await staleOrigin.PutAsJsonAsync($"/api/v1/admin/users/{viewerId}/roles",
+            new { roles = new[] { "Viewer" } });
+        Assert.Equal(System.Net.HttpStatusCode.Forbidden, csrfDenied.StatusCode);
+
+        using var rolesUpdate = await admin.PutAsJsonAsync($"/api/v1/admin/users/{viewerId}/roles",
+            new { roles = new[] { "Viewer" } });
+        Assert.Equal(System.Net.HttpStatusCode.NoContent, rolesUpdate.StatusCode);
+        Assert.Equal(System.Net.HttpStatusCode.Unauthorized,
+            (await viewerClient.GetAsync("/api/v1/auth/me")).StatusCode);
+        using var grant = await admin.PutAsync("/api/v1/admin/users/" + viewerId + "/cameras/capture-test", null);
+        Assert.Equal(System.Net.HttpStatusCode.NoContent, grant.StatusCode);
+        using var updatedDetail = await admin.GetAsync($"/api/v1/admin/users/{viewerId}");
+        var detailBody = await updatedDetail.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Contains("Viewer", detailBody.GetProperty("roles").EnumerateArray().Select(role => role.GetString()));
+        Assert.Equal("capture-test", detailBody.GetProperty("cameraGrants")[0].GetProperty("cameraId").GetString());
+
+        using var revoke = await admin.DeleteAsync($"/api/v1/admin/users/{viewerId}/cameras/capture-test");
+        Assert.Equal(System.Net.HttpStatusCode.NoContent, revoke.StatusCode);
+        using var secondGrant = await admin.PutAsync("/api/v1/admin/users/" + viewerId + "/cameras/capture-test", null);
+        Assert.Equal(System.Net.HttpStatusCode.NoContent, secondGrant.StatusCode);
+        using var deactivate = await admin.DeleteAsync($"/api/v1/admin/users/{viewerId}");
+        Assert.Equal(System.Net.HttpStatusCode.NoContent, deactivate.StatusCode);
+        using (var scope = factory.Services.CreateScope())
+        {
+            var database = scope.ServiceProvider.GetRequiredService<IamDbContext>();
+            Assert.All(await database.CameraAccessGrants.Where(grant => grant.UserId == viewerId).ToListAsync(),
+                grant => Assert.NotNull(grant.RevokedAtUtc));
+        }
+        using var inactiveLogin = await anonymous.PostAsJsonAsync("/api/v1/auth/login",
+            new { username = "admin-api-viewer", password = "Viewer-Password-123!" });
+        Assert.Equal(System.Net.HttpStatusCode.Unauthorized, inactiveLogin.StatusCode);
+
+        using var selfRoles = await admin.PutAsJsonAsync(
+            $"/api/v1/admin/users/{administratorId}/roles",
+            new { roles = new[] { "Viewer" } });
+        Assert.Equal(System.Net.HttpStatusCode.Conflict, selfRoles.StatusCode);
     }
 
     [Fact]
@@ -170,11 +265,12 @@ public sealed class IamTests
         };
         Assert.True((await users.CreateAsync(viewer, "Viewer-Password-123!")).Succeeded);
         Assert.True((await users.AddToRoleAsync(viewer, "Viewer")).Succeeded);
+        var cameraId = scope.ServiceProvider.GetRequiredService<GarageWatch.Infrastructure.Capture.CaptureOptions>().CameraId;
         await scope.ServiceProvider.GetRequiredService<IdentityAdministrationService>()
-            .GrantCameraAsync(admin.Id, viewer.Id, "garage", "garage-01");
+            .GrantCameraAsync(admin.Id, viewer.Id, "garage", cameraId);
 
         var grantRepository = scope.ServiceProvider.GetRequiredService<ICameraAccessGrantRepository>();
-        var bareGrant = Assert.IsType<CameraAccessGrantRecord>(await grantRepository.FindActiveAsync(viewer.Id, "garage-01"));
+        var bareGrant = Assert.IsType<CameraAccessGrantRecord>(await grantRepository.FindActiveAsync(viewer.Id, cameraId));
         Assert.Null(bareGrant.User);
         var detailedGrant = Assert.IsType<CameraAccessGrantRecord>(await grantRepository.GetAsync(bareGrant.Id, withDetails: true));
         Assert.Equal("repository-viewer", detailedGrant.User?.UserName);

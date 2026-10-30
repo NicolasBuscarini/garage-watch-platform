@@ -122,6 +122,73 @@ namespace GarageWatch.Infrastructure.Identity.Migrations
                     b.ToTable("CameraAccessGrants");
                 });
 
+            modelBuilder.Entity("GarageWatch.Infrastructure.Identity.CameraCatalogEntry", b =>
+                {
+                    b.Property<string>("CameraId")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ContextId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("CreatedAtUtc")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("IsEnabled")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("UpdatedAtUtc")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("CameraId");
+
+                    b.HasIndex("ContextId", "Name");
+
+                    b.ToTable("CameraCatalog");
+                });
+
+            modelBuilder.Entity("GarageWatch.Infrastructure.Identity.CameraContext", b =>
+                {
+                    b.Property<string>("ContextId")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("CreatedAtUtc")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("IsEnabled")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("UpdatedAtUtc")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("ContextId");
+
+                    b.HasIndex("Name");
+
+                    b.ToTable("CameraContexts");
+                });
+
             modelBuilder.Entity("GarageWatch.Infrastructure.Identity.IamAuditEvent", b =>
                 {
                     b.Property<Guid>("Id")
@@ -292,6 +359,17 @@ namespace GarageWatch.Infrastructure.Identity.Migrations
                     b.Navigation("User");
                 });
 
+            modelBuilder.Entity("GarageWatch.Infrastructure.Identity.CameraCatalogEntry", b =>
+                {
+                    b.HasOne("GarageWatch.Infrastructure.Identity.CameraContext", "Context")
+                        .WithMany("Cameras")
+                        .HasForeignKey("ContextId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Context");
+                });
+
             modelBuilder.Entity("GarageWatch.Infrastructure.Identity.IamAuditEvent", b =>
                 {
                     b.HasOne("GarageWatch.Infrastructure.Identity.ApplicationUser", "Actor")
@@ -358,6 +436,11 @@ namespace GarageWatch.Infrastructure.Identity.Migrations
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+                });
+
+            modelBuilder.Entity("GarageWatch.Infrastructure.Identity.CameraContext", b =>
+                {
+                    b.Navigation("Cameras");
                 });
 #pragma warning restore 612, 618
         }

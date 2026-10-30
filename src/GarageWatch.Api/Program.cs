@@ -8,11 +8,13 @@ using GarageWatch.Api.Observability;
 using GarageWatch.Api.Security;
 using GarageWatch.Infrastructure.Identity;
 using GarageWatch.Application.Profiles;
+using GarageWatch.Application.Cameras;
 using GarageWatch.Infrastructure;
 using MediatR;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.EntityFrameworkCore;
 using System.Security.Claims;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -174,20 +176,267 @@ app.MapPut("/api/v1/clients/presence", (ClientPresenceHeartbeat request, ClientP
             statusCode: StatusCodes.Status429TooManyRequests);
     return Results.Ok(new { activeClients, leaseSeconds = ClientPresenceRegistry.LeaseDuration.TotalSeconds });
 }).RequireAuthorization("Viewer");
-app.MapGet("/api/v1/cameras", (GarageWatch.Infrastructure.Capture.CaptureOptions captureOptions,
-    GarageWatch.Infrastructure.Capture.CaptureWorker capture) => Results.Ok(new[] { new
+app.MapGet("/api/v1/cameras", async (ClaimsPrincipal principal, UserManager<ApplicationUser> users,
+    ICameraCatalog catalog, GarageWatch.Infrastructure.Capture.CaptureOptions captureOptions,
+    GarageWatch.Infrastructure.Capture.CaptureWorker capture, CancellationToken cancellationToken) =>
+{
+    var user = await users.GetUserAsync(principal);
+    if (user is null || !user.IsActive) return Results.Unauthorized();
+    var isAdministrator = await users.IsInRoleAsync(user, "Administrator");
+    if (!isAdministrator && !await users.IsInRoleAsync(user, "Viewer"))
+        return Results.Forbid();
+    var cameras = await catalog.ListVisibleCamerasAsync(user.Id, isAdministrator, cancellationToken);
+    return Results.Ok(cameras.Select(camera => new
     {
-        cameraId = captureOptions.CameraId,
-        status = capture.Status.State,
-        streamEpoch = capture.Status.StreamEpoch,
-        liveUrl = $"/api/v1/live/{captureOptions.CameraId}/index.m3u8"
+        cameraId = camera.CameraId,
+        contextId = camera.ContextId,
+        name = camera.Name,
+        status = camera.IsEnabled && string.Equals(camera.CameraId, captureOptions.CameraId, StringComparison.Ordinal)
+            ? capture.Status.State
+            : "stopped",
+        streamEpoch = camera.IsEnabled && string.Equals(camera.CameraId, captureOptions.CameraId, StringComparison.Ordinal)
+            ? capture.Status.StreamEpoch
+            : null,
+        liveUrl = $"/api/v1/live/{camera.CameraId}/index.m3u8"
+    }));
+}).RequireAuthorization("Viewer");
+
+app.MapGet("/api/v1/admin/contexts", async (int? page, int? pageSize, ICameraCatalog catalog,
+    CancellationToken cancellationToken) =>
+    Results.Ok(await catalog.ListContextsAsync(page ?? 1, pageSize ?? 50, cancellationToken)))
+    .RequireAuthorization("Administrator");
+app.MapPost("/api/v1/admin/contexts", async (CreateCameraContextRequest request, HttpContext context,
+    ClaimsPrincipal principal, UserManager<ApplicationUser> users, ICameraCatalog catalog,
+    CancellationToken cancellationToken) =>
+{
+    if (!IsSameOrigin(context)) return Results.StatusCode(StatusCodes.Status403Forbidden);
+    var actor = await users.GetUserAsync(principal);
+    if (actor is null) return Results.Unauthorized();
+    try
+    {
+        var created = await catalog.CreateContextAsync(actor.Id, request.ContextId, request.Name, cancellationToken);
+        return Results.Created($"/api/v1/admin/contexts/{created.ContextId}", created);
     }
-})).RequireAuthorization("Viewer");
-app.MapGet("/api/v1/live/{cameraId}/index.m3u8", (string cameraId,
+    catch (Exception exception) when (exception is CatalogValidationException or CatalogConflictException or
+                                      CatalogNotFoundException or UnauthorizedAccessException)
+    {
+        return CatalogError(exception);
+    }
+}).RequireAuthorization("Administrator");
+app.MapPut("/api/v1/admin/contexts/{contextId}", async (string contextId, UpdateCameraContextRequest request,
+    HttpContext context, ClaimsPrincipal principal, UserManager<ApplicationUser> users, ICameraCatalog catalog,
+    CancellationToken cancellationToken) =>
+{
+    if (!IsSameOrigin(context)) return Results.StatusCode(StatusCodes.Status403Forbidden);
+    var actor = await users.GetUserAsync(principal);
+    if (actor is null) return Results.Unauthorized();
+    try
+    {
+        return Results.Ok(await catalog.UpdateContextAsync(actor.Id, contextId, request.Version, request.Name,
+            request.IsEnabled, cancellationToken));
+    }
+    catch (Exception exception) when (exception is CatalogValidationException or CatalogConflictException or
+                                      CatalogNotFoundException or UnauthorizedAccessException)
+    {
+        return CatalogError(exception);
+    }
+}).RequireAuthorization("Administrator");
+app.MapDelete("/api/v1/admin/contexts/{contextId}", async (string contextId, long version, HttpContext context,
+    ClaimsPrincipal principal, UserManager<ApplicationUser> users, ICameraCatalog catalog,
+    CancellationToken cancellationToken) =>
+{
+    if (!IsSameOrigin(context)) return Results.StatusCode(StatusCodes.Status403Forbidden);
+    var actor = await users.GetUserAsync(principal);
+    if (actor is null) return Results.Unauthorized();
+    try
+    {
+        return Results.Ok(await catalog.DeactivateContextAsync(actor.Id, contextId, version, cancellationToken));
+    }
+    catch (Exception exception) when (exception is CatalogValidationException or CatalogConflictException or
+                                      CatalogNotFoundException or UnauthorizedAccessException)
+    {
+        return CatalogError(exception);
+    }
+}).RequireAuthorization("Administrator");
+app.MapGet("/api/v1/admin/cameras", async (int? page, int? pageSize, string? contextId, ICameraCatalog catalog,
+    CancellationToken cancellationToken) => Results.Ok(await catalog.ListCamerasAsync(page ?? 1, pageSize ?? 50,
+    contextId, cancellationToken))).RequireAuthorization("Administrator");
+app.MapPost("/api/v1/admin/cameras", async (CreateCameraCatalogRequest request, HttpContext context,
+    ClaimsPrincipal principal, UserManager<ApplicationUser> users, ICameraCatalog catalog,
+    CancellationToken cancellationToken) =>
+{
+    if (!IsSameOrigin(context)) return Results.StatusCode(StatusCodes.Status403Forbidden);
+    var actor = await users.GetUserAsync(principal);
+    if (actor is null) return Results.Unauthorized();
+    try
+    {
+        var created = await catalog.CreateCameraAsync(actor.Id, request.CameraId, request.ContextId, request.Name,
+            cancellationToken);
+        return Results.Created($"/api/v1/admin/cameras/{created.CameraId}", created);
+    }
+    catch (Exception exception) when (exception is CatalogValidationException or CatalogConflictException or
+                                      CatalogNotFoundException or UnauthorizedAccessException)
+    {
+        return CatalogError(exception);
+    }
+}).RequireAuthorization("Administrator");
+app.MapPut("/api/v1/admin/cameras/{cameraId}", async (string cameraId, UpdateCameraCatalogRequest request,
+    HttpContext context, ClaimsPrincipal principal, UserManager<ApplicationUser> users, ICameraCatalog catalog,
+    CancellationToken cancellationToken) =>
+{
+    if (!IsSameOrigin(context)) return Results.StatusCode(StatusCodes.Status403Forbidden);
+    var actor = await users.GetUserAsync(principal);
+    if (actor is null) return Results.Unauthorized();
+    try
+    {
+        return Results.Ok(await catalog.UpdateCameraAsync(actor.Id, cameraId, request.Version, request.ContextId,
+            request.Name, request.IsEnabled, cancellationToken));
+    }
+    catch (Exception exception) when (exception is CatalogValidationException or CatalogConflictException or
+                                      CatalogNotFoundException or UnauthorizedAccessException)
+    {
+        return CatalogError(exception);
+    }
+}).RequireAuthorization("Administrator");
+app.MapDelete("/api/v1/admin/cameras/{cameraId}", async (string cameraId, long version, HttpContext context,
+    ClaimsPrincipal principal, UserManager<ApplicationUser> users, ICameraCatalog catalog,
+    CancellationToken cancellationToken) =>
+{
+    if (!IsSameOrigin(context)) return Results.StatusCode(StatusCodes.Status403Forbidden);
+    var actor = await users.GetUserAsync(principal);
+    if (actor is null) return Results.Unauthorized();
+    try
+    {
+        return Results.Ok(await catalog.DeactivateCameraAsync(actor.Id, cameraId, version, cancellationToken));
+    }
+    catch (Exception exception) when (exception is CatalogValidationException or CatalogConflictException or
+                                      CatalogNotFoundException or UnauthorizedAccessException)
+    {
+        return CatalogError(exception);
+    }
+}).RequireAuthorization("Administrator");
+app.MapGet("/api/v1/admin/users", async (int? page, int? pageSize, UserManager<ApplicationUser> users,
+    CancellationToken cancellationToken) =>
+{
+    var currentPage = page ?? 1;
+    var currentPageSize = pageSize ?? 25;
+    if (currentPage < 1 || currentPageSize is < 1 or > 100)
+        return Results.BadRequest(new { code = "invalid_pagination" });
+    var query = users.Users.AsNoTracking().OrderBy(user => user.NormalizedUserName).ThenBy(user => user.Id);
+    var totalCount = await query.CountAsync(cancellationToken);
+    var offset = ((long)currentPage - 1) * currentPageSize;
+    var items = offset >= totalCount
+        ? []
+        : await query.Skip((int)offset).Take(currentPageSize)
+            .Select(user => new AdminUserSummaryResponse(user.Id, user.UserName ?? string.Empty, user.IsActive))
+            .ToArrayAsync(cancellationToken);
+    return Results.Ok(new AdminUserPageResponse(items, currentPage, currentPageSize, totalCount));
+}).RequireAuthorization("Administrator");
+app.MapGet("/api/v1/admin/users/{userId:guid}", async (Guid userId, UserManager<ApplicationUser> users,
+    IamDbContext database, CancellationToken cancellationToken) =>
+{
+    var user = await users.FindByIdAsync(userId.ToString());
+    if (user is null) return Results.NotFound(new { code = "user_not_found" });
+    var roles = (await users.GetRolesAsync(user)).Order(StringComparer.Ordinal).ToArray();
+    var grants = await (from grant in database.CameraAccessGrants.AsNoTracking()
+                        where grant.UserId == userId
+                        join camera in database.CameraCatalog.AsNoTracking()
+                            on grant.CameraId equals camera.CameraId into cameras
+                        from camera in cameras.DefaultIfEmpty()
+                        orderby grant.GrantedAtUtc descending, grant.Id
+                        select new AdminUserCameraGrantResponse(grant.ContextId, grant.CameraId,
+                            camera == null ? null : camera.Name, grant.GrantedAtUtc, grant.RevokedAtUtc))
+        .ToArrayAsync(cancellationToken);
+    return Results.Ok(new AdminUserDetailsResponse(user.Id, user.UserName ?? string.Empty, user.IsActive,
+        roles, grants));
+}).RequireAuthorization("Administrator");
+app.MapPut("/api/v1/admin/users/{userId:guid}/roles", async (Guid userId, SetUserRolesRequest request,
+    HttpContext context, ClaimsPrincipal principal, UserManager<ApplicationUser> users,
+    IdentityAdministrationService administration, CancellationToken cancellationToken) =>
+{
+    if (!IsSameOrigin(context)) return Results.StatusCode(StatusCodes.Status403Forbidden);
+    var actor = await users.GetUserAsync(principal);
+    if (actor is null) return Results.Unauthorized();
+    if (request.Roles is null) return Results.BadRequest(new { code = "invalid_admin_request" });
+    try
+    {
+        await administration.SetRolesAsync(actor.Id, userId, request.Roles, cancellationToken);
+        return Results.NoContent();
+    }
+    catch (Exception exception) when (exception is ArgumentException or InvalidOperationException or
+                                      KeyNotFoundException or UnauthorizedAccessException)
+    {
+        return AdminIdentityError(exception);
+    }
+}).RequireAuthorization("Administrator");
+app.MapPut("/api/v1/admin/users/{userId:guid}/cameras/{cameraId}", async (Guid userId, string cameraId,
+    HttpContext context, ClaimsPrincipal principal, UserManager<ApplicationUser> users, IamDbContext database,
+    IdentityAdministrationService administration, CancellationToken cancellationToken) =>
+{
+    if (!IsSameOrigin(context)) return Results.StatusCode(StatusCodes.Status403Forbidden);
+    var actor = await users.GetUserAsync(principal);
+    if (actor is null) return Results.Unauthorized();
+    var contextId = await database.CameraCatalog.AsNoTracking()
+        .Where(camera => camera.CameraId == cameraId && camera.IsEnabled)
+        .Select(camera => camera.ContextId)
+        .SingleOrDefaultAsync(cancellationToken);
+    if (contextId is null) return Results.NotFound(new { code = "camera_not_found" });
+    try
+    {
+        await administration.GrantCameraAsync(actor.Id, userId, contextId, cameraId, cancellationToken);
+        return Results.NoContent();
+    }
+    catch (Exception exception) when (exception is ArgumentException or InvalidOperationException or
+                                      KeyNotFoundException or UnauthorizedAccessException)
+    {
+        return AdminIdentityError(exception);
+    }
+}).RequireAuthorization("Administrator");
+app.MapDelete("/api/v1/admin/users/{userId:guid}/cameras/{cameraId}", async (Guid userId, string cameraId,
+    HttpContext context, ClaimsPrincipal principal, UserManager<ApplicationUser> users,
+    IdentityAdministrationService administration, CancellationToken cancellationToken) =>
+{
+    if (!IsSameOrigin(context)) return Results.StatusCode(StatusCodes.Status403Forbidden);
+    var actor = await users.GetUserAsync(principal);
+    if (actor is null) return Results.Unauthorized();
+    try
+    {
+        await administration.RevokeCameraAsync(actor.Id, userId, cameraId, cancellationToken);
+        return Results.NoContent();
+    }
+    catch (Exception exception) when (exception is ArgumentException or InvalidOperationException or
+                                      KeyNotFoundException or UnauthorizedAccessException)
+    {
+        return AdminIdentityError(exception);
+    }
+}).RequireAuthorization("Administrator");
+app.MapDelete("/api/v1/admin/users/{userId:guid}", async (Guid userId, HttpContext context,
+    ClaimsPrincipal principal, UserManager<ApplicationUser> users, IdentityAdministrationService administration,
+    CancellationToken cancellationToken) =>
+{
+    if (!IsSameOrigin(context)) return Results.StatusCode(StatusCodes.Status403Forbidden);
+    var actor = await users.GetUserAsync(principal);
+    if (actor is null) return Results.Unauthorized();
+    try
+    {
+        await administration.DeactivateUserAsync(actor.Id, userId, cancellationToken);
+        return Results.NoContent();
+    }
+    catch (Exception exception) when (exception is ArgumentException or InvalidOperationException or
+                                      KeyNotFoundException or UnauthorizedAccessException)
+    {
+        return AdminIdentityError(exception);
+    }
+}).RequireAuthorization("Administrator");
+app.MapGet("/api/v1/live/{cameraId}/index.m3u8", async (string cameraId,
+    ClaimsPrincipal principal, UserManager<ApplicationUser> users, ICameraResourceAccess cameraAccess,
     GarageWatch.Infrastructure.Capture.CaptureOptions captureOptions,
     GarageWatch.Infrastructure.Capture.LocalSegmentSpool spool,
-    LivePlaylistSequence playlistSequence) =>
+    LivePlaylistSequence playlistSequence, CancellationToken cancellationToken) =>
 {
+    var user = await users.GetUserAsync(principal);
+    if (user is null || !user.IsActive) return Results.Unauthorized();
+    if (!await cameraAccess.CanReadLiveAsync(user.Id, cameraId, cancellationToken)) return Results.NotFound();
     if (!string.Equals(cameraId, captureOptions.CameraId, StringComparison.Ordinal)) return Results.NotFound();
     var segments = spool.GetRecentSegments(6);
     if (segments.Count == 0) return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
@@ -206,14 +455,18 @@ app.MapGet("/api/v1/live/{cameraId}/index.m3u8", (string cameraId,
     }
     return Results.Text(playlist.ToString(), "application/vnd.apple.mpegurl");
 }).RequireAuthorization("Viewer");
-app.MapGet("/api/v1/live/{cameraId}/segments/{segmentId}", (string cameraId, string segmentId,
+app.MapGet("/api/v1/live/{cameraId}/segments/{segmentId}", async (string cameraId, string segmentId,
+    ClaimsPrincipal principal, UserManager<ApplicationUser> users, ICameraResourceAccess cameraAccess,
     GarageWatch.Infrastructure.Capture.CaptureOptions captureOptions,
-    GarageWatch.Infrastructure.Capture.LocalSegmentSpool spool) =>
+    GarageWatch.Infrastructure.Capture.LocalSegmentSpool spool, CancellationToken cancellationToken) =>
 {
+    var user = await users.GetUserAsync(principal);
+    if (user is null || !user.IsActive) return Results.Unauthorized();
+    if (!await cameraAccess.CanReadLiveAsync(user.Id, cameraId, cancellationToken)) return Results.NotFound();
     if (!string.Equals(cameraId, captureOptions.CameraId, StringComparison.Ordinal) ||
         !GarageWatch.Infrastructure.Capture.LocalSegmentSpool.IsSafeSegmentId(segmentId)) return Results.NotFound();
     var item = spool.GetRecentSegments(captureOptions.MaximumSegments).FirstOrDefault(x => x.Manifest.SegmentId == segmentId);
-    return item.Manifest is null ? Results.NotFound() : Results.File(item.Path, "video/mp2t", enableRangeProcessing: false);
+    return item.Manifest is null ? Results.NotFound() : Results.File(item.Path, "video/mp2t", enableRangeProcessing: true);
 }).RequireAuthorization("Viewer");
 app.MapGet("/api/v1/system-profile", async (
     IMediator mediator,
@@ -243,6 +496,24 @@ static bool IsSameOrigin(HttpContext context)
         string.Equals(suppliedOrigin.GetLeftPart(UriPartial.Authority),
             requestOrigin.GetLeftPart(UriPartial.Authority), StringComparison.OrdinalIgnoreCase);
 }
+
+static IResult CatalogError(Exception exception) => exception switch
+{
+    CatalogValidationException => Results.BadRequest(new { code = "invalid_catalog_request" }),
+    CatalogNotFoundException => Results.NotFound(new { code = "catalog_item_not_found" }),
+    CatalogConflictException => Results.Conflict(new { code = "catalog_conflict" }),
+    UnauthorizedAccessException => Results.Forbid(),
+    _ => Results.StatusCode(StatusCodes.Status500InternalServerError)
+};
+
+static IResult AdminIdentityError(Exception exception) => exception switch
+{
+    ArgumentException => Results.BadRequest(new { code = "invalid_admin_request" }),
+    KeyNotFoundException => Results.NotFound(new { code = "admin_resource_not_found" }),
+    InvalidOperationException => Results.Conflict(new { code = "admin_operation_conflict" }),
+    UnauthorizedAccessException => Results.Forbid(),
+    _ => Results.StatusCode(StatusCodes.Status500InternalServerError)
+};
 
 app.Run();
 
