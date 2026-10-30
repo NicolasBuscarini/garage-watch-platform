@@ -98,7 +98,7 @@ services:
       CAPTURE_PROFILE: ffmpeg-rtsp
       CAPTURE_AUDIO_ENABLED: "true"
       CAPTURE_CAMERA_ID: "${CAPTURE_CAMERA_ID:-garage-01}"
-      CAPTURE_RTSP_URL: "${CAPTURE_RTSP_URL:-rtsp://neolink:8554/garage/mainStream}"
+      CAPTURE_RTSP_URL: "${CAMERA_RTSP_URL:-rtsp://neolink:8554/garage/mainStream}"
     networks:
       - default
       - rtsp_lab
