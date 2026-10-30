@@ -48,3 +48,7 @@ docker compose stop api
 Não use `down --volumes` nem remova `data/` para parar o serviço. Para reprodução de falhas sem câmera, `bash scripts/verify-rtsp-contract.sh` usa MediaMTX/publisher sintéticos; isso não homologa a câmera real, rede ou operação prolongada.
 
 Procedimento de contexto e limites adicionais: [guia compartilhado de execução local](../../docs/operacao/16_GUIA_EXECUCAO_LOCAL.md).
+
+## Frontend React em HMR (opt-in)
+
+O caminho padrão segue a UI estática compilada na imagem da API. Para desenvolver com Vite, clone/atualize o submodule e inicie `docker compose --profile web-dev up -d api web-dev`; acesse `http://127.0.0.1:5173`. Vite faz proxy same-origin para API/health e o cookie continua HttpOnly. Só publique no loopback. Não inicie esse profile enquanto `api-camera-integration`/outro consumidor estiver usando o mesmo banco ou spool; a API sintética também abre captura e compartilha `./data`. O serviço Vite é dev-only e não aparece no perfil de produção.

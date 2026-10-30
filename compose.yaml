@@ -15,6 +15,7 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Development
       ASPNETCORE_URLS: http://0.0.0.0:8080
+      ASPNETCORE_WEBROOT: /app/web
       OTEL_EXPORTER_OTLP_ENDPOINT: "${OTEL_EXPORTER_OTLP_ENDPOINT:-}"
       OTEL_EXPORTER_OTLP_HEADERS: "${OTEL_EXPORTER_OTLP_HEADERS:-}"
       CAPTURE_PROFILE: "${CAPTURE_PROFILE:-synthetic}"
@@ -65,6 +66,7 @@ services:
       DOTNET_CLI_HOME: /tmp
       NUGET_PACKAGES: /tmp/nuget
       HOME: /tmp
+      GARAGEWATCH_WEB_ROOT: /app/web
       OTEL_EXPORTER_OTLP_ENDPOINT: "${OTEL_EXPORTER_OTLP_ENDPOINT:-}"
       OTEL_EXPORTER_OTLP_HEADERS: "${OTEL_EXPORTER_OTLP_HEADERS:-}"
       CAPTURE_PROFILE: synthetic
@@ -187,7 +189,31 @@ services:
       - --urls
       - http://0.0.0.0:8080
 
+  web-dev:
+    image: node:24.22.2-bookworm-slim@sha256:c86ecead9e55a5210ac1727de38a4ca840bf03dcaf34dc9749addbf383b1920c
+    profiles: [web-dev]
+    init: true
+    working_dir: /web
+    volumes:
+      - ./web:/web
+      - web_node_modules:/web/node_modules
+    environment:
+      VITE_API_PROXY_TARGET: http://api:8080
+      NPM_CONFIG_CACHE: /tmp/npm-cache
+    tmpfs:
+      - /tmp:size=256m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      - api
+    ports:
+      - "127.0.0.1:${WEB_PORT:-5173}:5173"
+    command: sh -lc 'npm ci && npm run dev -- --host 0.0.0.0'
+
 networks:
   rtsp_lab:
     name: garage-watch-rtsp-lab
     external: true
+
+volumes:
+  web_node_modules:
