@@ -40,7 +40,7 @@ public sealed class ApiFactory : WebApplicationFactory<Program>
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseEnvironment("Testing");
-        builder.UseWebRoot(Environment.GetEnvironmentVariable("GARAGEWATCH_WEB_ROOT") ?? "wwwroot");
+        builder.UseWebRoot(Environment.GetEnvironmentVariable("GARAGEWATCH_WEB_ROOT") ?? "/app/web");
         builder.ConfigureAppConfiguration((_, configuration) => configuration.AddInMemoryCollection(new Dictionary<string, string?>
         {
             ["AUTH_USERNAME"] = _bootstrapUsername,

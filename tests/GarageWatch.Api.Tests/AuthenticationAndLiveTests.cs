@@ -86,6 +86,10 @@ public sealed class AuthenticationAndLiveTests
         Assert.Contains("prefers-reduced-motion", css, StringComparison.Ordinal);
         using var favicon = await anonymous.GetAsync("/favicon.svg");
         Assert.Equal(HttpStatusCode.OK, favicon.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await anonymous.GetAsync("/app.js")).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await anonymous.GetAsync("/app.css")).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await anonymous.GetAsync("/js/player.js")).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await anonymous.GetAsync("/vendor/hls.min.js")).StatusCode);
         Assert.Equal(HttpStatusCode.Unauthorized, (await anonymous.GetAsync("/api/v1/cameras")).StatusCode);
         Assert.Equal(HttpStatusCode.Unauthorized, (await anonymous.GetAsync("/api/v1/live/garage-01/index.m3u8")).StatusCode);
         Assert.Equal(HttpStatusCode.Unauthorized, (await anonymous.GetAsync("/health/ready")).StatusCode);
