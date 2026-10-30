@@ -1,6 +1,7 @@
 using GarageWatch.Application.Profiles;
 using GarageWatch.Application.Identity;
 using GarageWatch.Application.Cameras;
+using GarageWatch.Application.Authorization;
 using GarageWatch.Infrastructure.Capture;
 using GarageWatch.Infrastructure.Identity;
 using GarageWatch.Infrastructure.Identity.Repositories;
@@ -51,8 +52,10 @@ public static class DependencyInjection
         services.AddScoped<IamDatabaseInitializer>();
         services.AddScoped<IdentityRegistrationService>();
         services.AddScoped<IdentityAdministrationService>();
+        services.AddScoped<AccessProfileService>();
         services.AddScoped<ICameraCatalog, CameraCatalogService>();
         services.AddScoped<ICameraResourceAccess, CameraResourceAccessService>();
+        services.AddSingleton<IPermissionEvaluator, PermissionEvaluator>();
         services.AddSingleton<IamTransactionGate>();
         services.AddScoped<IIamUnitOfWork, IamUnitOfWork>();
         services.AddScoped<ICameraAccessGrantRepository, CameraAccessGrantRepository>();

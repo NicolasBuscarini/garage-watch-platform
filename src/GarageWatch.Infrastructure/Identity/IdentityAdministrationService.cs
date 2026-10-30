@@ -63,6 +63,12 @@ public sealed class IdentityAdministrationService(
             Record(actorUserId, subjectUserId, "camera.access.revoked", grant.CameraId);
         }
 
+        var activeProfileAssignments = await database.UserAccessProfileAssignments
+            .Where(assignment => assignment.UserId == subjectUserId && assignment.RevokedAtUtc == null)
+            .ToListAsync(token);
+        foreach (var assignment in activeProfileAssignments)
+            assignment.RevokedAtUtc = revokedAtUtc;
+
         user.IsActive = false;
         var updated = await users.UpdateAsync(user);
         if (!updated.Succeeded) throw new InvalidOperationException("Não foi possível desativar a conta.");

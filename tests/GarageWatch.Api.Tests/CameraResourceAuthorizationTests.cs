@@ -15,7 +15,7 @@ namespace GarageWatch.Api.Tests;
 public sealed class CameraResourceAuthorizationTests
 {
     [Fact]
-    public async Task Live_playlist_segments_and_ranges_are_scoped_to_current_camera_grant()
+    public async Task Live_playlist_segments_and_ranges_are_scoped_to_assigned_profile_and_camera_pair()
     {
         await using var factory = new ApiFactory();
         var cameraId = "capture-test";
@@ -31,16 +31,15 @@ public sealed class CameraResourceAuthorizationTests
             grantedViewerId = await CreateViewerAsync(users, "granted-viewer");
             ungrantedViewerId = await CreateViewerAsync(users, "ungranted-viewer");
             await CreateUserAsync(users, "ordinary-user");
-            await scope.ServiceProvider.GetRequiredService<IdentityAdministrationService>()
-                .GrantCameraAsync(adminId, grantedViewerId, "garage", cameraId);
         }
+        await AccessProfileTestHelper.AssignVideoAsync(factory.Services, adminId, grantedViewerId, "garage", cameraId);
 
         using var admin = await LoginAsync(factory, "contract-user", "Contract-Password-123!");
         using var granted = await LoginAsync(factory, "granted-viewer", "Viewer-Password-123!");
         using var ungranted = await LoginAsync(factory, "ungranted-viewer", "Viewer-Password-123!");
         using var ordinary = await LoginAsync(factory, "ordinary-user", "Viewer-Password-123!");
-        Assert.Equal(HttpStatusCode.Forbidden, (await ordinary.GetAsync("/api/v1/cameras")).StatusCode);
-        Assert.Equal(HttpStatusCode.Forbidden,
+        Assert.Equal(HttpStatusCode.OK, (await ordinary.GetAsync("/api/v1/cameras")).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound,
             (await ordinary.GetAsync($"/api/v1/live/{cameraId}/index.m3u8")).StatusCode);
 
         HttpResponseMessage? playlist = null;
@@ -88,8 +87,8 @@ public sealed class CameraResourceAuthorizationTests
 
         using (var scope = factory.Services.CreateScope())
         {
-            var administration = scope.ServiceProvider.GetRequiredService<IdentityAdministrationService>();
-            await administration.RevokeCameraAsync(adminId, grantedViewerId, cameraId);
+            var profiles = scope.ServiceProvider.GetRequiredService<AccessProfileService>();
+            await profiles.ReplaceAssignmentsAsync(adminId, grantedViewerId, [], CancellationToken.None);
             var database = scope.ServiceProvider.GetRequiredService<IamDbContext>();
             Assert.True(await database.IamAuditEvents.AnyAsync(entry => entry.SubjectUserId == ungrantedViewerId &&
                 entry.Action == "camera.access.denied" && entry.ResourceId == cameraId));
@@ -97,7 +96,7 @@ public sealed class CameraResourceAuthorizationTests
 
         // A still-open cookie cannot use a grant removed from the authoritative SQLite store.
         Assert.Equal(HttpStatusCode.Unauthorized,
-            (await granted.GetAsync($"/api/v1/live/{cameraId}/index.m3u8")).StatusCode);
+            (await granted.GetAsync("/api/v1/auth/me")).StatusCode);
         Assert.Equal(HttpStatusCode.Unauthorized,
             (await granted.GetAsync($"/api/v1/live/{cameraId}/segments/not-a-real-segment")).StatusCode);
     }

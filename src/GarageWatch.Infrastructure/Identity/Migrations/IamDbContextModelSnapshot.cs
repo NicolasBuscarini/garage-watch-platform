@@ -17,6 +17,78 @@ namespace GarageWatch.Infrastructure.Identity.Migrations
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.14");
 
+            modelBuilder.Entity("GarageWatch.Infrastructure.Identity.AccessProfile", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("UpdatedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Name")
+                        .IsUnique();
+
+                    b.ToTable("AccessProfiles");
+                });
+
+            modelBuilder.Entity("GarageWatch.Infrastructure.Identity.AccessProfilePermission", b =>
+                {
+                    b.Property<Guid>("AccessProfileVersionId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PermissionKey")
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("AccessProfileVersionId", "PermissionKey");
+
+                    b.ToTable("AccessProfilePermissions");
+                });
+
+            modelBuilder.Entity("GarageWatch.Infrastructure.Identity.AccessProfileVersion", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("CreatedByUserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("ProfileId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("Version")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ProfileId", "Version")
+                        .IsUnique();
+
+                    b.ToTable("AccessProfileVersions");
+                });
+
             modelBuilder.Entity("GarageWatch.Infrastructure.Identity.ApplicationUser", b =>
                 {
                     b.Property<Guid>("Id")
@@ -222,6 +294,70 @@ namespace GarageWatch.Infrastructure.Identity.Migrations
                     b.ToTable("IamAuditEvents");
                 });
 
+            modelBuilder.Entity("GarageWatch.Infrastructure.Identity.IamMigrationState", b =>
+                {
+                    b.Property<string>("Key")
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("CompletedAtUtc")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Key");
+
+                    b.ToTable("IamMigrationStates");
+                });
+
+            modelBuilder.Entity("GarageWatch.Infrastructure.Identity.UserAccessProfileAssignment", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("AccessProfileVersionId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("AssignedAtUtc")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid>("AssignedByUserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long?>("RevokedAtUtc")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AccessProfileVersionId");
+
+                    b.HasIndex("UserId", "AccessProfileVersionId")
+                        .IsUnique()
+                        .HasFilter("\"RevokedAtUtc\" IS NULL");
+
+                    b.ToTable("UserAccessProfileAssignments");
+                });
+
+            modelBuilder.Entity("GarageWatch.Infrastructure.Identity.UserAccessProfileScope", b =>
+                {
+                    b.Property<Guid>("AssignmentId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ContextId")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CameraId")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("AssignmentId", "ContextId", "CameraId");
+
+                    b.ToTable("UserAccessProfileScopes");
+                });
+
             modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityRole<System.Guid>", b =>
                 {
                     b.Property<Guid>("Id")
@@ -348,6 +484,28 @@ namespace GarageWatch.Infrastructure.Identity.Migrations
                     b.ToTable("AspNetUserTokens", (string)null);
                 });
 
+            modelBuilder.Entity("GarageWatch.Infrastructure.Identity.AccessProfilePermission", b =>
+                {
+                    b.HasOne("GarageWatch.Infrastructure.Identity.AccessProfileVersion", "Version")
+                        .WithMany("Permissions")
+                        .HasForeignKey("AccessProfileVersionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Version");
+                });
+
+            modelBuilder.Entity("GarageWatch.Infrastructure.Identity.AccessProfileVersion", b =>
+                {
+                    b.HasOne("GarageWatch.Infrastructure.Identity.AccessProfile", "Profile")
+                        .WithMany("Versions")
+                        .HasForeignKey("ProfileId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Profile");
+                });
+
             modelBuilder.Entity("GarageWatch.Infrastructure.Identity.CameraAccessGrant", b =>
                 {
                     b.HasOne("GarageWatch.Infrastructure.Identity.ApplicationUser", "User")
@@ -385,6 +543,36 @@ namespace GarageWatch.Infrastructure.Identity.Migrations
                     b.Navigation("Actor");
 
                     b.Navigation("Subject");
+                });
+
+            modelBuilder.Entity("GarageWatch.Infrastructure.Identity.UserAccessProfileAssignment", b =>
+                {
+                    b.HasOne("GarageWatch.Infrastructure.Identity.AccessProfileVersion", "ProfileVersion")
+                        .WithMany()
+                        .HasForeignKey("AccessProfileVersionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("GarageWatch.Infrastructure.Identity.ApplicationUser", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("ProfileVersion");
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("GarageWatch.Infrastructure.Identity.UserAccessProfileScope", b =>
+                {
+                    b.HasOne("GarageWatch.Infrastructure.Identity.UserAccessProfileAssignment", "Assignment")
+                        .WithMany("Scopes")
+                        .HasForeignKey("AssignmentId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Assignment");
                 });
 
             modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityRoleClaim<System.Guid>", b =>
@@ -438,9 +626,24 @@ namespace GarageWatch.Infrastructure.Identity.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("GarageWatch.Infrastructure.Identity.AccessProfile", b =>
+                {
+                    b.Navigation("Versions");
+                });
+
+            modelBuilder.Entity("GarageWatch.Infrastructure.Identity.AccessProfileVersion", b =>
+                {
+                    b.Navigation("Permissions");
+                });
+
             modelBuilder.Entity("GarageWatch.Infrastructure.Identity.CameraContext", b =>
                 {
                     b.Navigation("Cameras");
+                });
+
+            modelBuilder.Entity("GarageWatch.Infrastructure.Identity.UserAccessProfileAssignment", b =>
+                {
+                    b.Navigation("Scopes");
                 });
 #pragma warning restore 612, 618
         }

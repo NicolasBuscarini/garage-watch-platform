@@ -50,11 +50,13 @@ public sealed class RegistrationTests
         Assert.Equal(HttpStatusCode.NoContent, login.StatusCode);
         client.DefaultRequestHeaders.Add("Cookie", Assert.Single(login.Headers.GetValues("Set-Cookie")).Split(';', 2)[0]);
 
-        var me = await client.GetFromJsonAsync<Dictionary<string, string>>("/api/v1/auth/me");
-        Assert.NotNull(me);
-        Assert.Equal("User", me["role"]);
+        var me = await client.GetFromJsonAsync<System.Text.Json.JsonElement>("/api/v1/auth/me");
+        Assert.Equal("User", me.GetProperty("role").GetString());
+        Assert.False(me.GetProperty("canMonitor").GetBoolean());
         using var cameras = await client.GetAsync("/api/v1/cameras");
-        Assert.Equal(HttpStatusCode.Forbidden, cameras.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, cameras.StatusCode);
+        using var cameraList = await cameras.Content.ReadFromJsonAsync<System.Text.Json.JsonDocument>();
+        Assert.Empty(cameraList!.RootElement.EnumerateArray());
         using var readiness = await client.GetAsync("/health/ready");
         Assert.Equal(HttpStatusCode.Forbidden, readiness.StatusCode);
     }

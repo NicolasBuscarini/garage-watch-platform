@@ -102,6 +102,76 @@ public sealed class IamDatabaseInitializer(
             await database.SaveChangesAsync(cancellationToken);
         }
 
+        await MigrateLegacyCameraGrantsAsync(cancellationToken);
+
         await transaction.CommitAsync(cancellationToken);
+    }
+
+    private async Task MigrateLegacyCameraGrantsAsync(CancellationToken cancellationToken)
+    {
+        const string migrationKey = "legacy-camera-grants-to-access-profile-v1";
+        if (await database.IamMigrationStates.AnyAsync(item => item.Key == migrationKey, cancellationToken)) return;
+
+        var now = timeProvider.GetUtcNow();
+        var profile = await database.AccessProfiles.SingleOrDefaultAsync(item => item.Name == "Live somente vídeo",
+            cancellationToken);
+        AccessProfileVersion currentVersion;
+        if (profile is null)
+        {
+            profile = new AccessProfile
+            {
+                Id = Guid.NewGuid(),
+                Name = "Live somente vídeo",
+                IsActive = true,
+                Version = 1,
+                CreatedAtUtc = now,
+                UpdatedAtUtc = now
+            };
+            currentVersion = new AccessProfileVersion
+            {
+                Id = Guid.NewGuid(),
+                ProfileId = profile.Id,
+                Version = 1,
+                CreatedAtUtc = now,
+                CreatedByUserId = Guid.Empty
+            };
+            currentVersion.Permissions.Add(new AccessProfilePermission
+            {
+                AccessProfileVersionId = currentVersion.Id,
+                PermissionKey = "live.video.view"
+            });
+            database.AccessProfiles.Add(profile);
+            database.AccessProfileVersions.Add(currentVersion);
+        }
+        else
+            currentVersion = await database.AccessProfileVersions.SingleAsync(item =>
+                item.ProfileId == profile.Id && item.Version == profile.Version, cancellationToken);
+        var grants = await database.CameraAccessGrants.AsNoTracking()
+            .Where(grant => grant.RevokedAtUtc == null)
+            .OrderBy(grant => grant.UserId).ThenBy(grant => grant.ContextId).ThenBy(grant => grant.CameraId)
+            .ToArrayAsync(cancellationToken);
+        foreach (var group in grants.GroupBy(grant => grant.UserId))
+        {
+            var user = await users.FindByIdAsync(group.Key.ToString());
+            if (user is null || !user.IsActive || await users.IsInRoleAsync(user, "Administrator")) continue;
+            var assignment = new UserAccessProfileAssignment
+            {
+                Id = Guid.NewGuid(),
+                UserId = user.Id,
+                AccessProfileVersionId = currentVersion.Id,
+                AssignedByUserId = Guid.Empty,
+                AssignedAtUtc = now
+            };
+            foreach (var grant in group)
+                assignment.Scopes.Add(new UserAccessProfileScope
+                {
+                    AssignmentId = assignment.Id,
+                    ContextId = grant.ContextId,
+                    CameraId = grant.CameraId
+                });
+            database.UserAccessProfileAssignments.Add(assignment);
+        }
+        database.IamMigrationStates.Add(new IamMigrationState { Key = migrationKey, CompletedAtUtc = now });
+        await database.SaveChangesAsync(cancellationToken);
     }
 }

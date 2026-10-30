@@ -16,6 +16,7 @@
 | Microsoft.NET.Test.Sdk | 18.11.0 | MIT | Execução de testes |
 | xunit | 2.9.3 | Apache-2.0 | Testes unitários/integração |
 | xunit.runner.visualstudio | 3.1.5 | Apache-2.0 | Descoberta/executor de testes |
+| NSwag.AspNetCore | 14.7.1 | MIT, licença upstream | Geração OpenAPI/Swagger UI para Minimal APIs; middleware e assets same-origin, Development/Testing e Administrator-only; sem serviço Node/externo |
 | Microsoft.Extensions.Logging JSON console | runtime .NET 10 | Microsoft | Logging estruturado em stdout; sem sink de arquivo |
 | FFmpeg | Ubuntu `7:6.1.1-3ubuntu5` | `ffmpeg -L` confirmou build GPL-2-or-later (`--enable-gpl`, `--enable-libx264`); consultar notices da imagem e dependências transitivas | Segmentação RTSP/MPEG-TS por cópia e publisher sintético H.264 no T02. Publisher do teste gera Constrained Baseline/yuv420p para decodificação MSE ampla. Revisar obrigações de licença antes de distribuir a imagem. |
 | MediaMTX | `bluenviron/mediamtx:1.12.3`, digest `sha256:3634a1eed1288b93e8d22ed74694eae96d483fcf676cac5d0c91830ad1b86b3d` | MIT, licença upstream v1.12.3 | Servidor RTSP somente no perfil `rtsp-contract` do Compose; não é serviço ativo de produto nem endpoint/câmera real. |

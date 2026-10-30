@@ -1,4 +1,5 @@
 using GarageWatch.Application.Cameras;
+using GarageWatch.Application.Authorization;
 using GarageWatch.Application.Identity;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
@@ -9,27 +10,19 @@ public sealed class CameraResourceAccessService(
     IamDbContext database,
     IIamUnitOfWork unitOfWork,
     IIamAuditEventRepository auditEvents,
-    UserManager<ApplicationUser> users,
+    AccessProfileService profiles,
     TimeProvider timeProvider) : ICameraResourceAccess
 {
     public async Task<bool> CanReadLiveAsync(Guid userId, string cameraId,
         CancellationToken cancellationToken = default)
     {
-        var user = await users.FindByIdAsync(userId.ToString());
-        if (user is null || !user.IsActive) return false;
-
-        var roles = await users.GetRolesAsync(user);
-        var isAdministrator = roles.Contains("Administrator", StringComparer.Ordinal);
-        var isViewer = roles.Contains("Viewer", StringComparer.Ordinal);
         var catalogCamera = await database.CameraCatalog.AsNoTracking()
             .Where(camera => camera.CameraId == cameraId && camera.IsEnabled && camera.Context.IsEnabled)
             .Select(camera => new { camera.CameraId, camera.ContextId })
             .SingleOrDefaultAsync(cancellationToken);
 
-        var allowed = catalogCamera is not null && (isAdministrator || (isViewer &&
-            await database.CameraAccessGrants.AsNoTracking().AnyAsync(grant => grant.UserId == userId &&
-                grant.CameraId == catalogCamera.CameraId && grant.ContextId == catalogCamera.ContextId &&
-                grant.RevokedAtUtc == null, cancellationToken)));
+        var allowed = catalogCamera is not null && await profiles.IsAllowedAsync(userId,
+            new PermissionRequest("live.video.view", catalogCamera.ContextId, catalogCamera.CameraId), cancellationToken);
         if (allowed) return true;
 
         await unitOfWork.ExecuteAtomicallyAsync(token =>
@@ -38,6 +31,18 @@ public sealed class CameraResourceAccessService(
                 timeProvider.GetUtcNow());
             return Task.CompletedTask;
         }, cancellationToken);
+        return false;
+    }
+
+    public async Task<bool> HasAnyLiveAccessAsync(Guid userId, CancellationToken cancellationToken = default)
+    {
+        var cameras = await database.CameraCatalog.AsNoTracking()
+            .Where(camera => camera.IsEnabled && camera.Context.IsEnabled)
+            .Select(camera => new { camera.ContextId, camera.CameraId }).ToArrayAsync(cancellationToken);
+        foreach (var camera in cameras)
+            if (await profiles.IsAllowedAsync(userId,
+                    new PermissionRequest("live.video.view", camera.ContextId, camera.CameraId), cancellationToken))
+                return true;
         return false;
     }
 

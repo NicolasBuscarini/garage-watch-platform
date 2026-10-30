@@ -96,12 +96,16 @@ public sealed class CameraCatalogTests
             Assert.True((await users.AddToRoleAsync(viewer, "Viewer")).Succeeded);
             viewerId = viewer.Id;
             var admin = (await users.FindByNameAsync("contract-user"))!;
-            var administration = scope.ServiceProvider.GetRequiredService<IdentityAdministrationService>();
             var cameraId = scope.ServiceProvider.GetRequiredService<CaptureOptions>().CameraId;
-            await administration.GrantCameraAsync(admin.Id, viewerId, "garage", cameraId);
             var catalog = scope.ServiceProvider.GetRequiredService<ICameraCatalog>();
             await catalog.CreateCameraAsync(admin.Id, "ungranted-camera", "garage", "Sem concessão");
         }
+        Guid adminIdForGrant;
+        using (var adminScope = factory.Services.CreateScope())
+            adminIdForGrant = (await adminScope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>()
+                .FindByNameAsync("contract-user"))!.Id;
+        await AccessProfileTestHelper.AssignVideoAsync(factory.Services, adminIdForGrant, viewerId, "garage",
+            factory.Services.GetRequiredService<CaptureOptions>().CameraId);
 
         using var adminResponse = await adminClient.GetAsync("/api/v1/cameras");
         Assert.Equal(HttpStatusCode.OK, adminResponse.StatusCode);
@@ -111,16 +115,14 @@ public sealed class CameraCatalogTests
         using var scope2 = factory.Services.CreateScope();
         var viewerUser = await scope2.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>()
             .FindByIdAsync(viewerId.ToString());
-        var storedGrant = await scope2.ServiceProvider.GetRequiredService<IamDbContext>().CameraAccessGrants
+        var storedGrant = await scope2.ServiceProvider.GetRequiredService<IamDbContext>().UserAccessProfileScopes
             .AsNoTracking().SingleAsync();
-        Assert.Equal(viewerId, storedGrant.UserId);
         Assert.Equal("garage", storedGrant.ContextId);
         Assert.Equal(scope2.ServiceProvider.GetRequiredService<CaptureOptions>().CameraId, storedGrant.CameraId);
         var catalogDb = scope2.ServiceProvider.GetRequiredService<IamDbContext>();
         Assert.Equal(1, await catalogDb.CameraCatalog.CountAsync(item => item.CameraId == storedGrant.CameraId && item.IsEnabled));
         Assert.True(await catalogDb.CameraContexts.AnyAsync(item => item.ContextId == "garage" && item.IsEnabled));
-        Assert.Equal(1, await catalogDb.CameraAccessGrants.CountAsync(item => item.UserId == viewerId &&
-            item.CameraId == storedGrant.CameraId && item.ContextId == "garage" && item.RevokedAtUtc == null));
+        Assert.Equal(1, await catalogDb.UserAccessProfileScopes.CountAsync(item => item.CameraId == storedGrant.CameraId && item.ContextId == "garage"));
         var visible = await scope2.ServiceProvider.GetRequiredService<ICameraCatalog>()
             .ListVisibleCamerasAsync(viewerUser!.Id, false);
         Assert.Equal(storedGrant.CameraId, Assert.Single(visible).CameraId);

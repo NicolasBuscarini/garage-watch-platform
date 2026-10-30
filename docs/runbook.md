@@ -25,6 +25,10 @@ Abra `http://127.0.0.1:8081`, entre e use **Ir ao vivo**/Play. API e painel não
 
 No perfil `synthetic`, o player deve mostrar um padrão colorido em movimento gerado localmente (640×360/15 fps). Se ficar preto, confira a captura/HLS e os logs; o padrão é mídia de teste, não imagem da câmera.
 
+## Documentação da API (Development/Testing)
+
+Com API ativa e sessão Administrator no mesmo navegador, abra `http://127.0.0.1:8081/docs` para Swagger UI ou `/openapi/v1.json` para o documento. A porta muda conforme `.env`. Estas rotas são ocultadas em Production e não devem ser expostas na LAN/Internet.
+
 ## Laboratório RTSP (opcional)
 
 Inicie Neolink conforme suas instruções locais e conecte-o à rede Docker externa interna `garage-watch-rtsp-lab`. A câmera inventariada é declarada como Reolink E1 básica; RTSP standalone não foi confirmado e pode exigir Home Hub/NVR. Não presuma compatibilidade direta: confira [`docs/operacao/04_HARDWARE.md`](../../docs/operacao/04_HARDWARE.md) e valide o bridge/stream disponível antes. A configuração de segredo do bridge fica fora do Git. Confirme a rede com `docker network inspect garage-watch-rtsp-lab --format '{{.Internal}}'` (deve ser `true`); se o nome já existir como não interna, pare em vez de removê-la. No `.env`, configure a URI de alias, sem segredo, por exemplo `rtsp://neolink:8554/garage/mainStream`.

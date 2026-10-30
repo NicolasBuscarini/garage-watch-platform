@@ -10,6 +10,7 @@ public sealed class CameraCatalogService(
     IIamUnitOfWork unitOfWork,
     IIamAuditEventRepository auditEvents,
     UserManager<ApplicationUser> users,
+    AccessProfileService accessProfiles,
     TimeProvider timeProvider) : ICameraCatalog
 {
     public async Task<CatalogPage<CameraContextRecord>> ListContextsAsync(int page, int pageSize,
@@ -52,16 +53,26 @@ public sealed class CameraCatalogService(
                 .ToArrayAsync(cancellationToken);
         }
 
-        return await cameras
+        var enabled = await cameras
             .Where(camera => camera.IsEnabled && database.CameraContexts.Any(context =>
-                context.ContextId == camera.ContextId && context.IsEnabled) &&
-                database.CameraAccessGrants.Any(grant => grant.UserId == userId &&
-                    grant.CameraId == camera.CameraId && grant.ContextId == camera.ContextId &&
-                    grant.RevokedAtUtc == null))
+                context.ContextId == camera.ContextId && context.IsEnabled))
             .OrderBy(camera => camera.CameraId)
             .Select(camera => new CameraCatalogRecord(camera.CameraId, camera.ContextId, camera.Name, camera.IsEnabled,
                 camera.Version, camera.CreatedAtUtc, camera.UpdatedAtUtc))
             .ToArrayAsync(cancellationToken);
+        var visible = new List<CameraCatalogRecord>();
+        foreach (var camera in enabled)
+        {
+            var canList = await accessProfiles.IsAllowedAsync(userId,
+                new GarageWatch.Application.Authorization.PermissionRequest("camera.list", camera.ContextId,
+                    camera.CameraId), cancellationToken);
+            var canViewLive = await accessProfiles.IsAllowedAsync(userId,
+                new GarageWatch.Application.Authorization.PermissionRequest("live.video.view", camera.ContextId,
+                    camera.CameraId), cancellationToken);
+            if (canList || canViewLive)
+                visible.Add(camera);
+        }
+        return visible;
     }
 
     public Task<CameraContextRecord> CreateContextAsync(Guid actorUserId, string contextId, string name,

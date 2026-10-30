@@ -21,10 +21,12 @@ public sealed class ApiFactory : WebApplicationFactory<Program>
     private readonly string _databasePath;
     private readonly string? _bootstrapUsername;
     private readonly string? _bootstrapPassword;
+    private readonly string _environment;
 
     public ApiFactory(ISystemProfileSource? profileSource = null, ILoggerProvider? loggerProvider = null,
         ISegmentCaptureAdapter? captureAdapter = null, string? databasePath = null,
-        string? bootstrapUsername = "contract-user", string? bootstrapPassword = "Contract-Password-123!")
+        string? bootstrapUsername = "contract-user", string? bootstrapPassword = "Contract-Password-123!",
+        string environment = "Testing")
     {
         _profileSource = profileSource;
         _loggerProvider = loggerProvider;
@@ -33,13 +35,14 @@ public sealed class ApiFactory : WebApplicationFactory<Program>
         _databasePath = databasePath ?? Path.Combine(Path.GetTempPath(), "garagewatch-tests", $"{Guid.NewGuid():N}.db");
         _bootstrapUsername = bootstrapUsername;
         _bootstrapPassword = bootstrapPassword;
+        _environment = environment;
     }
 
     public string DatabasePath => _databasePath;
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
-        builder.UseEnvironment("Testing");
+        builder.UseEnvironment(_environment);
         builder.UseWebRoot(Environment.GetEnvironmentVariable("GARAGEWATCH_WEB_ROOT") ?? "/app/web");
         builder.ConfigureAppConfiguration((_, configuration) => configuration.AddInMemoryCollection(new Dictionary<string, string?>
         {

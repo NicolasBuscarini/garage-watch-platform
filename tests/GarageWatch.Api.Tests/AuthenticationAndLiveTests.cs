@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Text.Json;
 using GarageWatch.Api.Live;
 using GarageWatch.Infrastructure.Identity;
 using Microsoft.AspNetCore.Identity;
@@ -240,17 +241,17 @@ public sealed class AuthenticationAndLiveTests
             Assert.True((await userManager.AddToRoleAsync(viewer, "Viewer")).Succeeded);
             var administrator = (await userManager.FindByNameAsync("contract-user"))!;
             var captureOptions = scope.ServiceProvider.GetRequiredService<GarageWatch.Infrastructure.Capture.CaptureOptions>();
-            await scope.ServiceProvider.GetRequiredService<IdentityAdministrationService>()
-                .GrantCameraAsync(administrator.Id, viewer.Id, "garage", captureOptions.CameraId);
+            await AccessProfileTestHelper.AssignVideoAsync(factory.Services, administrator.Id, viewer.Id, "garage",
+                captureOptions.CameraId);
         }
         using var login = await client.PostAsJsonAsync("/api/v1/auth/login",
             new { username = "viewer-user", password = "Viewer-Password-123!" });
         Assert.Equal(HttpStatusCode.NoContent, login.StatusCode);
         client.DefaultRequestHeaders.Add("Cookie", Assert.Single(login.Headers.GetValues("Set-Cookie")).Split(';', 2)[0]);
 
-        var me = await client.GetFromJsonAsync<Dictionary<string, string>>("/api/v1/auth/me");
-        Assert.NotNull(me);
-        Assert.Equal("Viewer", me["role"]);
+        var me = await client.GetFromJsonAsync<JsonElement>("/api/v1/auth/me");
+        Assert.Equal("Viewer", me.GetProperty("role").GetString());
+        Assert.True(me.GetProperty("canMonitor").GetBoolean());
         using var cameras = await client.GetAsync("/api/v1/cameras");
         Assert.Equal(HttpStatusCode.OK, cameras.StatusCode);
         using var cameraJson = System.Text.Json.JsonDocument.Parse(await cameras.Content.ReadAsStringAsync());
