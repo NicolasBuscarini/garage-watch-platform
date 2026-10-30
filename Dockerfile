@@ -1,8 +1,12 @@
 FROM node:24.22.2-bookworm-slim@sha256:c86ecead9e55a5210ac1727de38a4ca840bf03dcaf34dc9749addbf383b1920c AS web-build
 WORKDIR /web
-COPY web/package.json web/package-lock.json ./
+COPY --from=web_source /package.json /package-lock.json ./
 RUN npm ci
-COPY web/ ./
+COPY --from=web_source /index.html ./index.html
+COPY --from=web_source /vite.config.ts ./vite.config.ts
+COPY --from=web_source /tsconfig.json /tsconfig.app.json /tsconfig.node.json ./
+COPY --from=web_source /src ./src
+COPY --from=web_source /public ./public
 RUN npm run build
 
 FROM mcr.microsoft.com/dotnet/sdk:10.0.403@sha256:de4fe90a98845d75910b9769662465c84de1a934665c431279d1382b2bddc02b

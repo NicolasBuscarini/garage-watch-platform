@@ -23,6 +23,8 @@ curl --fail --silent http://127.0.0.1:8081/health/live
 
 Abra `http://127.0.0.1:8081`, entre e use **Ir ao vivo**/Play. API e painel não ficam disponíveis na LAN. `/health/ready` é protegido e retorna 503 quando captura não confirmou segmento; liveness continua independente.
 
+No perfil `synthetic`, o player deve mostrar um padrão colorido em movimento gerado localmente (640×360/15 fps). Se ficar preto, confira a captura/HLS e os logs; o padrão é mídia de teste, não imagem da câmera.
+
 ## Laboratório RTSP (opcional)
 
 Inicie Neolink conforme suas instruções locais e conecte-o à rede Docker externa interna `garage-watch-rtsp-lab`. A câmera inventariada é declarada como Reolink E1 básica; RTSP standalone não foi confirmado e pode exigir Home Hub/NVR. Não presuma compatibilidade direta: confira [`docs/operacao/04_HARDWARE.md`](../../docs/operacao/04_HARDWARE.md) e valide o bridge/stream disponível antes. A configuração de segredo do bridge fica fora do Git. Confirme a rede com `docker network inspect garage-watch-rtsp-lab --format '{{.Internal}}'` (deve ser `true`); se o nome já existir como não interna, pare em vez de removê-la. No `.env`, configure a URI de alias, sem segredo, por exemplo `rtsp://neolink:8554/garage/mainStream`.
@@ -51,4 +53,4 @@ Procedimento de contexto e limites adicionais: [guia compartilhado de execução
 
 ## Frontend React em HMR (opt-in)
 
-O caminho padrão segue a UI estática compilada na imagem da API. Para desenvolver com Vite, clone/atualize o submodule e inicie `docker compose --profile web-dev up -d api web-dev`; acesse `http://127.0.0.1:5173`. Vite faz proxy same-origin para API/health e o cookie continua HttpOnly. Só publique no loopback. Não inicie esse profile enquanto `api-camera-integration`/outro consumidor estiver usando o mesmo banco ou spool; a API sintética também abre captura e compartilha `./data`. O serviço Vite é dev-only e não aparece no perfil de produção.
+Na operação via contexto compartilhado, `GARAGE_WEB_HMR=true` é padrão. `./garage up` inicia o profile Vite nos modos synthetic e camera e imprime a URL; acesse `http://127.0.0.1:5173` (ou a porta configurada, usando `:` antes da porta) para receber Fast Refresh/HMR das mudanças no clone independente `projects/garage-watch-web`. Se a API já estiver ativa sem HMR, use `./garage web`, que sobe somente o Vite e o conecta à API existente. O volume dev aponta ao clone, não a `web/` submodule fixado por SHA; o build estático de API/produção continua usando o submodule. `GARAGE_WEB_HMR=false` usa só o bundle compilado. O proxy Vite encaminha same-origin para API/health e o cookie continua HttpOnly. Só publique no loopback. O profile Vite não depende nem inicia outra API e o wrapper não roda HMR em `t00a`. HMR é dev-only e não recarrega alterações backend.

@@ -1,4 +1,5 @@
 using GarageWatch.Infrastructure.Capture;
+using System.Diagnostics;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using System.Text.Json;
@@ -67,6 +68,49 @@ public sealed class CapturePipelineTests
             ["CAPTURE_SEGMENT_TIMEOUT_SECONDS"] = "5"
         }).Build();
         Assert.Throws<InvalidOperationException>(() => CaptureOptions.FromEnvironment(invalidTimeout));
+    }
+
+    [Fact]
+    public async Task Synthetic_video_adapter_emits_decodable_h264_with_changing_test_pattern_frames()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "garagewatch-capture-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        var options = new CaptureOptions("synthetic", "garage-01", root, 1, 4, 1_048_576, null, "ffmpeg", "ffprobe");
+        var adapter = new SyntheticSegmentCaptureAdapter(options);
+        var iterator = adapter.CaptureAsync(root, CancellationToken.None).GetAsyncEnumerator();
+        try
+        {
+            Assert.True(await iterator.MoveNextAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(12)));
+            var segment = iterator.Current;
+            Assert.True(File.Exists(segment.SourcePath));
+            Assert.True(new FileInfo(segment.SourcePath).Length > 1_024);
+
+            var probe = await RunMediaToolAsync("ffprobe", [
+                "-v", "error", "-select_streams", "v:0", "-show_entries",
+                "stream=codec_name,profile,width,height,pix_fmt", "-of", "json", segment.SourcePath
+            ], readBinaryOutput: false);
+            using var media = JsonDocument.Parse(probe.TextOutput);
+            var stream = Assert.Single(media.RootElement.GetProperty("streams").EnumerateArray());
+            Assert.Equal("h264", stream.GetProperty("codec_name").GetString());
+            Assert.Equal("Constrained Baseline", stream.GetProperty("profile").GetString());
+            Assert.Equal(640, stream.GetProperty("width").GetInt32());
+            Assert.Equal(360, stream.GetProperty("height").GetInt32());
+            Assert.Equal("yuv420p", stream.GetProperty("pix_fmt").GetString());
+
+            var decoded = await RunMediaToolAsync("ffmpeg", [
+                "-v", "error", "-i", segment.SourcePath, "-frames:v", "2", "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"
+            ], readBinaryOutput: true);
+            const int frameBytes = 640 * 360 * 3;
+            Assert.True(decoded.BinaryOutput.Length >= frameBytes * 2,
+                $"Expected two decoded RGB frames, received {decoded.BinaryOutput.Length} bytes.");
+            Assert.False(decoded.BinaryOutput.AsSpan(0, frameBytes).SequenceEqual(decoded.BinaryOutput.AsSpan(frameBytes, frameBytes)),
+                "The synthetic source must change across frames, not emit a static/black frame.");
+        }
+        finally
+        {
+            await iterator.DisposeAsync();
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
     }
 
     [Fact]
@@ -262,6 +306,45 @@ public sealed class CapturePipelineTests
             await Task.Delay(25);
         }
         throw new TimeoutException("Capture worker did not persist a manifest.");
+    }
+
+    private static async Task<(string TextOutput, byte[] BinaryOutput)> RunMediaToolAsync(string executable,
+        IReadOnlyList<string> arguments, bool readBinaryOutput)
+    {
+        var startInfo = new ProcessStartInfo(executable)
+        {
+            UseShellExecute = false,
+            RedirectStandardError = true,
+            RedirectStandardOutput = !readBinaryOutput,
+            CreateNoWindow = true
+        };
+        if (readBinaryOutput) startInfo.RedirectStandardOutput = true;
+        foreach (var argument in arguments) startInfo.ArgumentList.Add(argument);
+        using var process = new Process { StartInfo = startInfo };
+        Assert.True(process.Start());
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var errorTask = process.StandardError.ReadToEndAsync(timeout.Token);
+        using var binary = new MemoryStream();
+        Task<string>? textTask = readBinaryOutput ? null : process.StandardOutput.ReadToEndAsync(timeout.Token);
+        Task? binaryTask = readBinaryOutput ? process.StandardOutput.BaseStream.CopyToAsync(binary, timeout.Token) : null;
+        try
+        {
+            await process.WaitForExitAsync(timeout.Token);
+            if (binaryTask is not null) await binaryTask;
+            var errors = await errorTask;
+            var text = textTask is null ? string.Empty : await textTask;
+            Assert.True(process.ExitCode == 0, $"{executable} failed with exit code {process.ExitCode}: {errors}");
+            return (text, binary.ToArray());
+        }
+        catch
+        {
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+                await process.WaitForExitAsync(CancellationToken.None);
+            }
+            throw;
+        }
     }
 
     private static void AssertContractProperties(System.Text.Json.JsonDocument payload, string schemaFile)

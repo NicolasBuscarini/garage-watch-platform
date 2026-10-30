@@ -63,7 +63,8 @@ public sealed class FfmpegRtspCaptureAdapter(CaptureOptions options) : ISegmentC
                 {
                     if (!codecValidated)
                     {
-                        await ValidateStreamsAsync(completed, cancellationToken);
+                        await MpegTsStreamValidator.ValidateAsync(completed, options.FfprobePath, options.AudioEnabled,
+                            cancellationToken);
                         codecValidated = true;
                     }
                     var end = DateTimeOffset.UtcNow;
@@ -79,7 +80,8 @@ public sealed class FfmpegRtspCaptureAdapter(CaptureOptions options) : ISegmentC
                     throw new InvalidDataException("capture_segment_size_limit");
                 if (!codecValidated)
                 {
-                    await ValidateStreamsAsync(completed, cancellationToken);
+                    await MpegTsStreamValidator.ValidateAsync(completed, options.FfprobePath, options.AudioEnabled,
+                        cancellationToken);
                     codecValidated = true;
                 }
                 var end = DateTimeOffset.UtcNow;
@@ -110,9 +112,119 @@ public sealed class FfmpegRtspCaptureAdapter(CaptureOptions options) : ISegmentC
         while (await reader.ReadLineAsync() is not null) { }
     }
 
-    private async Task ValidateStreamsAsync(string path, CancellationToken cancellationToken)
+}
+
+public sealed class SyntheticSegmentCaptureAdapter(CaptureOptions options) : ISegmentCaptureAdapter
+{
+    public string Name => "synthetic-video-test-pattern";
+    public string Version => "2.0";
+    public IReadOnlyList<string> Capabilities => ["synthetic-video", "h264", "mpeg-ts-segmentation", "gap-contract"];
+
+    public async IAsyncEnumerable<CapturedSegment> CaptureAsync(
+        string workDirectory,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        var startInfo = new ProcessStartInfo(options.FfprobePath)
+        Directory.CreateDirectory(workDirectory);
+        var output = Path.Combine(workDirectory, "segment_%08d.ts");
+        var start = DateTimeOffset.UtcNow;
+        var startInfo = new ProcessStartInfo(options.FfmpegPath)
+        {
+            UseShellExecute = false,
+            RedirectStandardError = true,
+            RedirectStandardOutput = true,
+            CreateNoWindow = true
+        };
+        var arguments = new[]
+        {
+            "-nostdin", "-hide_banner", "-loglevel", "error",
+            "-re", "-f", "lavfi", "-i", "testsrc2=size=640x360:rate=15",
+            "-map", "0:v:0", "-an", "-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency",
+            "-profile:v", "baseline", "-level:v", "3.0", "-pix_fmt", "yuv420p",
+            "-g", "15", "-keyint_min", "15", "-sc_threshold", "0",
+            "-f", "segment", "-segment_time", options.SegmentSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            "-segment_format", "mpegts", output
+        };
+        foreach (var argument in arguments) startInfo.ArgumentList.Add(argument);
+
+        using var process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
+        try
+        {
+            if (!process.Start()) throw new InvalidOperationException("synthetic_ffmpeg_start_failed");
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            throw new InvalidOperationException("synthetic_ffmpeg_start_failed", exception);
+        }
+
+        var stderrDrain = DrainAsync(process.StandardError);
+        var stdoutDrain = DrainAsync(process.StandardOutput);
+        var codecValidated = false;
+        try
+        {
+            while (!process.HasExited)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var files = Directory.GetFiles(workDirectory, "segment_*.ts").OrderBy(x => x, StringComparer.Ordinal).ToArray();
+                if (files.Any(file => new FileInfo(file).Length > options.MaximumSegmentBytes)
+                    || files.Sum(file => new FileInfo(file).Length) > options.MaximumSegmentBytes * 2)
+                    throw new InvalidDataException("capture_segment_size_limit");
+                foreach (var completed in files.Take(Math.Max(0, files.Length - 1)))
+                {
+                    if (!codecValidated)
+                    {
+                        await MpegTsStreamValidator.ValidateAsync(completed, options.FfprobePath, audioEnabled: false,
+                            cancellationToken);
+                        codecValidated = true;
+                    }
+                    var end = DateTimeOffset.UtcNow;
+                    yield return new CapturedSegment(completed, start, end);
+                    start = end;
+                }
+                await Task.Delay(100, cancellationToken);
+            }
+
+            foreach (var completed in Directory.GetFiles(workDirectory, "segment_*.ts").OrderBy(x => x, StringComparer.Ordinal))
+            {
+                if (new FileInfo(completed).Length > options.MaximumSegmentBytes)
+                    throw new InvalidDataException("capture_segment_size_limit");
+                if (!codecValidated)
+                {
+                    await MpegTsStreamValidator.ValidateAsync(completed, options.FfprobePath, audioEnabled: false,
+                        cancellationToken);
+                    codecValidated = true;
+                }
+                var end = DateTimeOffset.UtcNow;
+                yield return new CapturedSegment(completed, start, end);
+                start = end;
+            }
+
+            await process.WaitForExitAsync(cancellationToken);
+            await Task.WhenAll(stderrDrain, stdoutDrain);
+            if (process.ExitCode != 0) throw new InvalidOperationException("synthetic_ffmpeg_ended");
+        }
+        finally
+        {
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+                await process.WaitForExitAsync(CancellationToken.None);
+            }
+            await Task.WhenAll(stderrDrain, stdoutDrain);
+        }
+    }
+
+    private static async Task DrainAsync(StreamReader reader)
+    {
+        while (await reader.ReadLineAsync() is not null) { }
+    }
+}
+
+internal static class MpegTsStreamValidator
+{
+    public static async Task ValidateAsync(string path, string ffprobePath, bool audioEnabled,
+        CancellationToken cancellationToken)
+    {
+        var startInfo = new ProcessStartInfo(ffprobePath)
         {
             UseShellExecute = false,
             RedirectStandardError = true,
@@ -142,7 +254,7 @@ public sealed class FfmpegRtspCaptureAdapter(CaptureOptions options) : ISegmentC
                 .Select(stream => stream.GetProperty("codec_name").GetString()).ToArray();
             if (videoCodecs.Length != 1 || videoCodecs[0] != "h264")
                 throw new InvalidDataException("capture_codec_unsupported");
-            if (options.AudioEnabled && !audioCodecs.Contains("aac", StringComparer.Ordinal))
+            if (audioEnabled && !audioCodecs.Contains("aac", StringComparer.Ordinal))
                 throw new InvalidDataException("capture_audio_unsupported");
         }
         finally
@@ -154,26 +266,9 @@ public sealed class FfmpegRtspCaptureAdapter(CaptureOptions options) : ISegmentC
             }
         }
     }
-}
 
-public sealed class SyntheticSegmentCaptureAdapter(CaptureOptions options) : ISegmentCaptureAdapter
-{
-    public string Name => "synthetic-segment-source";
-    public string Version => "1.0";
-    public IReadOnlyList<string> Capabilities => ["synthetic-segments", "gap-contract"];
-
-    public async IAsyncEnumerable<CapturedSegment> CaptureAsync(
-        string workDirectory,
-        [EnumeratorCancellation] CancellationToken cancellationToken)
+    private static async Task DrainAsync(StreamReader reader)
     {
-        Directory.CreateDirectory(workDirectory);
-        while (!cancellationToken.IsCancellationRequested)
-        {
-            var start = DateTimeOffset.UtcNow;
-            await Task.Delay(TimeSpan.FromSeconds(options.SegmentSeconds), cancellationToken);
-            var path = Path.Combine(workDirectory, $"segment_{Guid.NewGuid():N}.ts");
-            await File.WriteAllBytesAsync(path, "synthetic-mpegts-contract"u8.ToArray(), cancellationToken);
-            yield return new CapturedSegment(path, start, DateTimeOffset.UtcNow);
-        }
+        while (await reader.ReadLineAsync() is not null) { }
     }
 }

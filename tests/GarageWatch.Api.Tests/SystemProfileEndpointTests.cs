@@ -100,9 +100,9 @@ public sealed class SystemProfileEndpointTests
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Equal("ready", body.RootElement.GetProperty("status").GetString());
         var capture = body.RootElement.GetProperty("capture");
-        Assert.Equal("synthetic-segment-source", capture.GetProperty("adapter").GetString());
-        Assert.Equal("1.0", capture.GetProperty("adapterVersion").GetString());
-        Assert.Contains("synthetic-segments", capture.GetProperty("capabilities").EnumerateArray()
+        Assert.Equal("synthetic-video-test-pattern", capture.GetProperty("adapter").GetString());
+        Assert.Equal("2.0", capture.GetProperty("adapterVersion").GetString());
+        Assert.Contains("synthetic-video", capture.GetProperty("capabilities").EnumerateArray()
             .Select(value => value.GetString()));
         Assert.Equal("capturing", capture.GetProperty("state").GetString());
         Assert.DoesNotContain("RTSP", body.RootElement.ToString(), StringComparison.OrdinalIgnoreCase);

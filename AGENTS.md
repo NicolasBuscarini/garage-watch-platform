@@ -5,6 +5,7 @@
 - A autoridade de produto/arquitetura é `../../docs/` no repositório de contexto. Não contrariar ADRs sem registrar nova ADR antes ou com a implementação.
 - T00-S está concluída; T00-H segue pendente e bloqueia somente o piloto real. Não alegar compatibilidade de câmera/NAS, desempenho, precisão ou validação 24/7.
 - O perfil `camera-integration` é laboratório opt-in: consome o main stream Neolink pela rede Docker interna `garage-watch-rtsp-lab`; não usar credenciais na URI nem expor RTSP/API na LAN. Testar somente um consumidor por vez até validar concorrência.
+- O profile Compose `web-dev` é dev-only e bound a loopback; HMR usa o clone irmão `../garage-watch-web`. Via `./garage`, o build estático/API também usa esse clone como build context, para `./garage up` empacotar a source atual; o submodule `web/` permanece fallback para Compose direto sem configuração do wrapper. Não retargetar o volume HMR ao submodule fixado. O Vite não depende de/inicia a API; o wrapper seleciona `VITE_API_PROXY_TARGET` para a única API Platform já ativa e nunca recria a captura ao ligar apenas HMR.
 - Implementar a base T01 e incrementos autorizados no backlog. RTSP só é habilitado nos perfis `synthetic`, `rtsp-contract` e `camera-integration`; não implementar IA, reconhecimento, eventos completos, NAS, UI Android ou automação física sem tarefa desbloqueada.
 
 ## Engenharia
