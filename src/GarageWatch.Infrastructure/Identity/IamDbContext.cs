@@ -2,12 +2,14 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
+using Microsoft.Data.Sqlite;
 
 namespace GarageWatch.Infrastructure.Identity;
 
-public sealed class IamDbContext(DbContextOptions<IamDbContext> options)
+public sealed class IamDbContext(DbContextOptions<IamDbContext> options, IPublicIdGenerator publicIds)
     : IdentityDbContext<ApplicationUser, IdentityRole<Guid>, Guid>(options)
 {
+    internal bool DeferPublicIdCollisionRetries { get; set; }
     private static readonly ValueConverter<DateTimeOffset, long> UtcTicksConverter = new(
         value => value.UtcTicks,
         value => new DateTimeOffset(value, TimeSpan.Zero));
@@ -29,6 +31,33 @@ public sealed class IamDbContext(DbContextOptions<IamDbContext> options)
     public DbSet<ClipAnalysisDispatchPolicy> ClipAnalysisDispatchPolicies => Set<ClipAnalysisDispatchPolicy>();
     public DbSet<ClipAnalysisJob> ClipAnalysisJobs => Set<ClipAnalysisJob>();
 
+    public override int SaveChanges(bool acceptAllChangesOnSuccess)
+    {
+        EnsureAddedPublicIds();
+        for (var attempt = 0; ; attempt++)
+        {
+            try { return base.SaveChanges(acceptAllChangesOnSuccess); }
+            catch (DbUpdateException exception) when (!DeferPublicIdCollisionRetries && attempt < 4 && IsPublicIdCollision(exception))
+            {
+                RegenerateAddedPublicIds();
+            }
+        }
+    }
+
+    public override async Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess,
+        CancellationToken cancellationToken = default)
+    {
+        EnsureAddedPublicIds();
+        for (var attempt = 0; ; attempt++)
+        {
+            try { return await base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken); }
+            catch (DbUpdateException exception) when (!DeferPublicIdCollisionRetries && attempt < 4 && IsPublicIdCollision(exception))
+            {
+                RegenerateAddedPublicIds();
+            }
+        }
+    }
+
     protected override void OnModelCreating(ModelBuilder builder)
     {
         base.OnModelCreating(builder);
@@ -48,6 +77,8 @@ public sealed class IamDbContext(DbContextOptions<IamDbContext> options)
                 .HasForeignKey(grant => grant.UserId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
+
+        ConfigurePublicId<ApplicationUser>(builder, PublicIdPrefixes.UserPrefix);
 
         builder.Entity<IamAuditEvent>(entity =>
         {
@@ -75,6 +106,7 @@ public sealed class IamDbContext(DbContextOptions<IamDbContext> options)
             entity.Property(context => context.CreatedAtUtc).HasConversion(UtcTicksConverter);
             entity.Property(context => context.UpdatedAtUtc).HasConversion(UtcTicksConverter);
             entity.HasIndex(context => context.Name);
+            ConfigurePublicId(entity, PublicIdPrefixes.ContextPrefix);
         });
 
         builder.Entity<CameraCatalogEntry>(entity =>
@@ -84,9 +116,12 @@ public sealed class IamDbContext(DbContextOptions<IamDbContext> options)
             entity.Property(camera => camera.ContextId).HasMaxLength(64).IsRequired();
             entity.Property(camera => camera.Name).HasMaxLength(128).IsRequired();
             entity.Property(camera => camera.Version).IsConcurrencyToken();
+            entity.Property(camera => camera.ClipTriggerEnabled).IsRequired();
+            entity.Property(camera => camera.ClipTriggerVersion).IsConcurrencyToken();
             entity.Property(camera => camera.CreatedAtUtc).HasConversion(UtcTicksConverter);
             entity.Property(camera => camera.UpdatedAtUtc).HasConversion(UtcTicksConverter);
             entity.HasIndex(camera => new { camera.ContextId, camera.Name });
+            ConfigurePublicId(entity, PublicIdPrefixes.CameraPrefix);
             entity.HasOne(camera => camera.Context)
                 .WithMany(context => context.Cameras)
                 .HasForeignKey(camera => camera.ContextId)
@@ -99,11 +134,13 @@ public sealed class IamDbContext(DbContextOptions<IamDbContext> options)
             entity.Property(profile => profile.Name).HasMaxLength(128).IsRequired();
             entity.Property(profile => profile.Version).IsConcurrencyToken();
             entity.HasIndex(profile => profile.Name).IsUnique();
+            ConfigurePublicId(entity, PublicIdPrefixes.AccessProfilePrefix);
         });
         builder.Entity<AccessProfileVersion>(entity =>
         {
             entity.HasKey(version => version.Id);
             entity.HasIndex(version => new { version.ProfileId, version.Version }).IsUnique();
+            ConfigurePublicId(entity, PublicIdPrefixes.AccessProfileVersionPrefix);
             entity.HasOne(version => version.Profile).WithMany(profile => profile.Versions)
                 .HasForeignKey(version => version.ProfileId).OnDelete(DeleteBehavior.Restrict);
             entity.HasMany(version => version.Permissions).WithOne(permission => permission.Version)
@@ -125,6 +162,7 @@ public sealed class IamDbContext(DbContextOptions<IamDbContext> options)
                 .HasForeignKey(assignment => assignment.AccessProfileVersionId).OnDelete(DeleteBehavior.Restrict);
             entity.Property(assignment => assignment.AssignedAtUtc).HasConversion(UtcTicksConverter);
             entity.Property(assignment => assignment.RevokedAtUtc).HasConversion(NullableUtcTicksConverter);
+            ConfigurePublicId(entity, PublicIdPrefixes.ProfileAssignmentPrefix);
         });
         builder.Entity<UserAccessProfileScope>(entity =>
         {
@@ -151,6 +189,7 @@ public sealed class IamDbContext(DbContextOptions<IamDbContext> options)
             entity.HasIndex(request => new { request.Status, request.CreatedAtUtc });
             entity.HasOne(request => request.User).WithMany().HasForeignKey(request => request.UserId)
                 .OnDelete(DeleteBehavior.Restrict);
+            ConfigurePublicId(entity, PublicIdPrefixes.AccessRequestPrefix);
         });
         builder.Entity<ClipAnalysisDispatchPolicy>(entity =>
         {
@@ -180,6 +219,36 @@ public sealed class IamDbContext(DbContextOptions<IamDbContext> options)
             entity.HasIndex(job => new { job.ClipId, job.AnalysisVersion }).IsUnique();
             entity.HasIndex(job => new { job.ClipId, job.IdempotencyKey }).IsUnique();
             entity.HasIndex(job => new { job.State, job.CreatedAtUtc });
+            ConfigurePublicId(entity, PublicIdPrefixes.ClipAnalysisJobPrefix);
         });
+    }
+
+    private void EnsureAddedPublicIds()
+    {
+        foreach (var entry in ChangeTracker.Entries<IHasPublicId>().Where(entry => entry.State == EntityState.Added))
+            entry.Entity.PublicId ??= publicIds.Generate(PublicIdPrefixes.For(entry.Entity));
+    }
+
+    private void RegenerateAddedPublicIds()
+    {
+        foreach (var entry in ChangeTracker.Entries<IHasPublicId>().Where(entry => entry.State == EntityState.Added))
+        {
+            entry.Entity.PublicId = publicIds.Generate(PublicIdPrefixes.For(entry.Entity));
+            entry.Property(nameof(IHasPublicId.PublicId)).IsModified = false;
+        }
+    }
+
+    private static bool IsPublicIdCollision(DbUpdateException exception) =>
+        exception.InnerException is SqliteException { SqliteErrorCode: 19 } sqlite &&
+        sqlite.Message.Contains("PublicId", StringComparison.OrdinalIgnoreCase);
+
+    private static void ConfigurePublicId<TEntity>(ModelBuilder builder, string prefix)
+        where TEntity : class, IHasPublicId => ConfigurePublicId(builder.Entity<TEntity>(), prefix);
+
+    private static void ConfigurePublicId<TEntity>(Microsoft.EntityFrameworkCore.Metadata.Builders.EntityTypeBuilder<TEntity> entity,
+        string prefix) where TEntity : class, IHasPublicId
+    {
+        entity.Property(item => item.PublicId).HasMaxLength(prefix.Length + 12);
+        entity.HasIndex(item => item.PublicId).IsUnique().HasFilter("\"PublicId\" IS NOT NULL");
     }
 }

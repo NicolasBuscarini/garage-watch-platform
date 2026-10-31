@@ -3,17 +3,17 @@ using Microsoft.EntityFrameworkCore;
 
 namespace GarageWatch.Infrastructure.Identity;
 
-public sealed record AccessRequestSummary(Guid Id, Guid UserId, string Username, string Purpose, string Status,
+public sealed record AccessRequestSummary(string PublicId, string UserPublicId, string Username, string Purpose, string Status,
     DateTimeOffset CreatedAtUtc);
 
 public sealed record AccessRequestPage(IReadOnlyList<AccessRequestSummary> Items, int Page, int PageSize,
     int TotalCount);
 
-public sealed record AccessRequestResult(Guid Id, string Purpose, string Status, DateTimeOffset CreatedAtUtc);
+public sealed record AccessRequestResult(string PublicId, string Purpose, string Status, DateTimeOffset CreatedAtUtc);
 public sealed class AccessRequestConflictException(string message) : Exception(message);
 
 public sealed class AccessRequestService(IamDbContext database, IIamUnitOfWork unitOfWork,
-    IIamAuditEventRepository auditEvents, TimeProvider timeProvider)
+    IIamAuditEventRepository auditEvents, TimeProvider timeProvider, IPublicIdGenerator publicIds)
 {
     public Task<AccessRequestResult> CreateAsync(Guid userId, Guid idempotencyKey, string purpose,
         CancellationToken cancellationToken) => unitOfWork.ExecuteAtomicallyAsync(async token =>
@@ -46,6 +46,7 @@ public sealed class AccessRequestService(IamDbContext database, IIamUnitOfWork u
         var request = new AccessRequest
         {
             Id = Guid.NewGuid(),
+            PublicId = publicIds.Generate(PublicIdPrefixes.AccessRequestPrefix),
             UserId = userId,
             IdempotencyKey = idempotencyKey,
             Purpose = purpose,
@@ -73,7 +74,7 @@ public sealed class AccessRequestService(IamDbContext database, IIamUnitOfWork u
         var totalCount = await query.CountAsync(cancellationToken);
         var items = await query.OrderByDescending(item => item.CreatedAtUtc).ThenBy(item => item.Id)
             .Skip((page - 1) * pageSize).Take(pageSize)
-            .Select(item => new AccessRequestSummary(item.Id, item.UserId, item.User!.UserName!, item.Purpose,
+            .Select(item => new AccessRequestSummary(item.PublicId!, item.User!.PublicId!, item.User.UserName!, item.Purpose,
                 item.Status, item.CreatedAtUtc))
             .ToArrayAsync(cancellationToken);
         return new AccessRequestPage(items, page, pageSize, totalCount);
@@ -99,5 +100,5 @@ public sealed class AccessRequestService(IamDbContext database, IIamUnitOfWork u
         }, cancellationToken);
 
     private static AccessRequestResult Map(AccessRequest request) =>
-        new(request.Id, request.Purpose, request.Status, request.CreatedAtUtc);
+        new(request.PublicId!, request.Purpose, request.Status, request.CreatedAtUtc);
 }

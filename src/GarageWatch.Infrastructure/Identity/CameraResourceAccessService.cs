@@ -17,7 +17,7 @@ public sealed class CameraResourceAccessService(
         CancellationToken cancellationToken = default)
     {
         var catalogCamera = await database.CameraCatalog.AsNoTracking()
-            .Where(camera => camera.CameraId == cameraId && camera.IsEnabled && camera.Context.IsEnabled)
+            .Where(camera => camera.PublicId == cameraId && camera.IsEnabled && camera.Context.IsEnabled)
             .Select(camera => new { camera.CameraId, camera.ContextId })
             .SingleOrDefaultAsync(cancellationToken);
 
@@ -27,7 +27,8 @@ public sealed class CameraResourceAccessService(
 
         await unitOfWork.ExecuteAtomicallyAsync(token =>
         {
-            auditEvents.Append(userId, userId, "camera.access.denied", IsSafeIdentifier(cameraId) ? cameraId : null,
+            auditEvents.Append(userId, userId, "camera.access.denied", PublicIdFormat.IsValid(cameraId,
+                    PublicIdPrefixes.CameraPrefix) ? cameraId : null,
                 timeProvider.GetUtcNow());
             return Task.CompletedTask;
         }, cancellationToken);

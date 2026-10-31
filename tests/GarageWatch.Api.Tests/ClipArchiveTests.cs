@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text.Json;
 using GarageWatch.Infrastructure.Capture;
+using GarageWatch.Infrastructure.Identity;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
@@ -212,7 +213,8 @@ public sealed class ClipArchiveTests
         var now = DateTimeOffset.UtcNow;
         var clip = new ClipManifestV1("1.0", clipId, "camera-archive", now.AddSeconds(-10), now,
             now.AddSeconds(-9), now.AddSeconds(-1), "ready", "fixture-trigger-v1", "synthetic:test",
-            [Guid.NewGuid().ToString("N")], mediaName, Sha256(media), thumbnailName, Sha256(thumbnail), 1, now);
+            [Guid.NewGuid().ToString("N")], mediaName, Sha256(media), thumbnailName, Sha256(thumbnail), 1, now,
+            PublicId: new PublicIdGenerator().Generate(PublicIdPrefixes.ClipPrefix));
         await WriteClipManifestAsync(spool, clip);
         return clip;
     }

@@ -20,7 +20,7 @@ public sealed class CreateContextEndpoint() : BaseEndpoint("Camera administratio
             if (actor is null) return Results.Unauthorized();
             try
             {
-                var created = await catalog.CreateContextAsync(actor.Id, request.ContextId, request.Name, cancellationToken);
+                var created = await catalog.CreateContextAsync(actor.Id, request.Name, cancellationToken);
                 return Results.Created($"/api/v1/admin/contexts/{created.ContextId}", created);
             }
             catch (Exception exception) when (exception is CatalogValidationException or CatalogConflictException or

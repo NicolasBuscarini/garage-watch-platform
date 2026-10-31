@@ -1,8 +1,9 @@
 namespace GarageWatch.Infrastructure.Identity;
 
-public sealed class AccessRequest
+public sealed class AccessRequest : IHasPublicId
 {
     public Guid Id { get; set; }
+    public string? PublicId { get; set; }
     public Guid UserId { get; set; }
     public Guid IdempotencyKey { get; set; }
     public string Purpose { get; set; } = string.Empty;

@@ -10,7 +10,7 @@ public sealed class ListUsersEndpoint() : BaseEndpoint("User administration", "A
     "List user accounts", "Returns a stable page of minimized account data; email, password hashes, and tokens are not exposed.")
 {
     protected override RouteHandlerBuilder MapCore(IEndpointRouteBuilder routes) =>
-        routes.MapGet("/api/v1/admin/users", async (Guid? userId, int? page, int? pageSize,
+        routes.MapGet("/api/v1/admin/users", async (string? userId, int? page, int? pageSize,
             UserManager<ApplicationUser> users, CancellationToken cancellationToken) =>
         {
             var currentPage = page ?? 1;
@@ -18,14 +18,19 @@ public sealed class ListUsersEndpoint() : BaseEndpoint("User administration", "A
             if (currentPage < 1 || currentPageSize is < 1 or > 100)
                 return Results.BadRequest(new ApiErrorResponse("invalid_pagination"));
             var query = users.Users.AsNoTracking();
-            if (userId.HasValue) query = query.Where(user => user.Id == userId.Value);
+            if (userId is not null)
+            {
+                if (!PublicIdFormat.IsValid(userId, PublicIdPrefixes.UserPrefix))
+                    return Results.BadRequest(new ApiErrorResponse("invalid_user_id"));
+                query = query.Where(user => user.PublicId == userId);
+            }
             var totalCount = await query.CountAsync(cancellationToken);
             var offset = ((long)currentPage - 1) * currentPageSize;
             var items = offset >= totalCount
                 ? []
                 : await query.OrderBy(user => user.NormalizedUserName).ThenBy(user => user.Id)
                     .Skip((int)offset).Take(currentPageSize)
-                    .Select(user => new AdminUserSummaryResponse(user.Id, user.UserName ?? string.Empty, user.IsActive))
+                    .Select(user => new AdminUserSummaryResponse(user.PublicId!, user.UserName ?? string.Empty, user.IsActive))
                     .ToArrayAsync(cancellationToken);
             return Results.Ok(new AdminUserPageResponse(items, currentPage, currentPageSize, totalCount));
         }).RequireAuthorization("Administrator")

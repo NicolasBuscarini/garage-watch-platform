@@ -11,9 +11,10 @@ public sealed class ClipAnalysisDispatchPolicy
     public DateTimeOffset UpdatedAtUtc { get; set; }
 }
 
-public sealed class ClipAnalysisJob
+public sealed class ClipAnalysisJob : IHasPublicId
 {
     public Guid Id { get; set; }
+    public string? PublicId { get; set; }
     public string ClipId { get; set; } = string.Empty;
     public string ContextId { get; set; } = string.Empty;
     public string CameraId { get; set; } = string.Empty;

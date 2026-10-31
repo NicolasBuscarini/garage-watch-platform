@@ -34,6 +34,10 @@ namespace GarageWatch.Infrastructure.Identity.Migrations
                         .HasMaxLength(128)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("PublicId")
+                        .HasMaxLength(15)
+                        .HasColumnType("TEXT");
+
                     b.Property<DateTimeOffset>("UpdatedAtUtc")
                         .HasColumnType("TEXT");
 
@@ -45,6 +49,10 @@ namespace GarageWatch.Infrastructure.Identity.Migrations
 
                     b.HasIndex("Name")
                         .IsUnique();
+
+                    b.HasIndex("PublicId")
+                        .IsUnique()
+                        .HasFilter("\"PublicId\" IS NOT NULL");
 
                     b.ToTable("AccessProfiles");
                 });
@@ -78,10 +86,18 @@ namespace GarageWatch.Infrastructure.Identity.Migrations
                     b.Property<Guid>("ProfileId")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("PublicId")
+                        .HasMaxLength(15)
+                        .HasColumnType("TEXT");
+
                     b.Property<long>("Version")
                         .HasColumnType("INTEGER");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("PublicId")
+                        .IsUnique()
+                        .HasFilter("\"PublicId\" IS NOT NULL");
 
                     b.HasIndex("ProfileId", "Version")
                         .IsUnique();
@@ -101,6 +117,10 @@ namespace GarageWatch.Infrastructure.Identity.Migrations
                     b.Property<Guid>("IdempotencyKey")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("PublicId")
+                        .HasMaxLength(15)
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("Purpose")
                         .IsRequired()
                         .HasMaxLength(32)
@@ -115,6 +135,10 @@ namespace GarageWatch.Infrastructure.Identity.Migrations
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("PublicId")
+                        .IsUnique()
+                        .HasFilter("\"PublicId\" IS NOT NULL");
 
                     b.HasIndex("UserId")
                         .IsUnique()
@@ -174,6 +198,10 @@ namespace GarageWatch.Infrastructure.Identity.Migrations
                     b.Property<bool>("PhoneNumberConfirmed")
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("PublicId")
+                        .HasMaxLength(15)
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("SecurityStamp")
                         .HasColumnType("TEXT");
 
@@ -192,6 +220,10 @@ namespace GarageWatch.Infrastructure.Identity.Migrations
                     b.HasIndex("NormalizedUserName")
                         .IsUnique()
                         .HasDatabaseName("UserNameIndex");
+
+                    b.HasIndex("PublicId")
+                        .IsUnique()
+                        .HasFilter("\"PublicId\" IS NOT NULL");
 
                     b.ToTable("AspNetUsers", (string)null);
                 });
@@ -239,6 +271,13 @@ namespace GarageWatch.Infrastructure.Identity.Migrations
                         .HasMaxLength(64)
                         .HasColumnType("TEXT");
 
+                    b.Property<bool>("ClipTriggerEnabled")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("ClipTriggerVersion")
+                        .IsConcurrencyToken()
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("ContextId")
                         .IsRequired()
                         .HasMaxLength(64)
@@ -255,6 +294,10 @@ namespace GarageWatch.Infrastructure.Identity.Migrations
                         .HasMaxLength(128)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("PublicId")
+                        .HasMaxLength(15)
+                        .HasColumnType("TEXT");
+
                     b.Property<long>("UpdatedAtUtc")
                         .HasColumnType("INTEGER");
 
@@ -263,6 +306,10 @@ namespace GarageWatch.Infrastructure.Identity.Migrations
                         .HasColumnType("INTEGER");
 
                     b.HasKey("CameraId");
+
+                    b.HasIndex("PublicId")
+                        .IsUnique()
+                        .HasFilter("\"PublicId\" IS NOT NULL");
 
                     b.HasIndex("ContextId", "Name");
 
@@ -286,6 +333,10 @@ namespace GarageWatch.Infrastructure.Identity.Migrations
                         .HasMaxLength(128)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("PublicId")
+                        .HasMaxLength(15)
+                        .HasColumnType("TEXT");
+
                     b.Property<long>("UpdatedAtUtc")
                         .HasColumnType("INTEGER");
 
@@ -296,6 +347,10 @@ namespace GarageWatch.Infrastructure.Identity.Migrations
                     b.HasKey("ContextId");
 
                     b.HasIndex("Name");
+
+                    b.HasIndex("PublicId")
+                        .IsUnique()
+                        .HasFilter("\"PublicId\" IS NOT NULL");
 
                     b.ToTable("CameraContexts");
                 });
@@ -380,6 +435,10 @@ namespace GarageWatch.Infrastructure.Identity.Migrations
                     b.Property<long>("PolicyVersion")
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("PublicId")
+                        .HasMaxLength(15)
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("RequestKind")
                         .IsRequired()
                         .HasMaxLength(32)
@@ -394,6 +453,10 @@ namespace GarageWatch.Infrastructure.Identity.Migrations
                         .HasColumnType("INTEGER");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("PublicId")
+                        .IsUnique()
+                        .HasFilter("\"PublicId\" IS NOT NULL");
 
                     b.HasIndex("ClipId", "AnalysisVersion")
                         .IsUnique();
@@ -468,6 +531,10 @@ namespace GarageWatch.Infrastructure.Identity.Migrations
                     b.Property<Guid>("AssignedByUserId")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("PublicId")
+                        .HasMaxLength(15)
+                        .HasColumnType("TEXT");
+
                     b.Property<long?>("RevokedAtUtc")
                         .HasColumnType("INTEGER");
 
@@ -477,6 +544,10 @@ namespace GarageWatch.Infrastructure.Identity.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("AccessProfileVersionId");
+
+                    b.HasIndex("PublicId")
+                        .IsUnique()
+                        .HasFilter("\"PublicId\" IS NOT NULL");
 
                     b.HasIndex("UserId", "AccessProfileVersionId")
                         .IsUnique()

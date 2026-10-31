@@ -3,6 +3,7 @@ using GarageWatch.Application.Cameras;
 using GarageWatch.Infrastructure.Capture;
 using GarageWatch.Infrastructure.Identity;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.EntityFrameworkCore;
 using System.Security.Claims;
 
 namespace GarageWatch.Api.Endpoints.Live;
@@ -13,12 +14,14 @@ public sealed class GetSegmentEndpoint() : BaseEndpoint("Live video", "GetLiveSe
     protected override RouteHandlerBuilder MapCore(IEndpointRouteBuilder routes) =>
         routes.MapGet("/api/v1/live/{cameraId}/segments/{segmentId}", async (string cameraId, string segmentId,
             ClaimsPrincipal principal, UserManager<ApplicationUser> users, ICameraResourceAccess cameraAccess,
-            CaptureOptions captureOptions, LocalSegmentSpool spool, CancellationToken cancellationToken) =>
+            IamDbContext database, CaptureOptions captureOptions, LocalSegmentSpool spool, CancellationToken cancellationToken) =>
         {
             var user = await users.GetUserAsync(principal);
             if (user is null || !user.IsActive) return Results.Unauthorized();
             if (!await cameraAccess.CanReadLiveAsync(user.Id, cameraId, cancellationToken)) return Results.NotFound();
-            if (!string.Equals(cameraId, captureOptions.CameraId, StringComparison.Ordinal) ||
+            var internalCameraId = await database.CameraCatalog.AsNoTracking().Where(item => item.PublicId == cameraId)
+                .Select(item => item.CameraId).SingleOrDefaultAsync(cancellationToken);
+            if (!string.Equals(internalCameraId, captureOptions.CameraId, StringComparison.Ordinal) ||
                 !LocalSegmentSpool.IsSafeSegmentId(segmentId)) return Results.NotFound();
             var item = spool.GetRecentSegments(captureOptions.MaximumSegments)
                 .FirstOrDefault(x => x.Manifest.SegmentId == segmentId);

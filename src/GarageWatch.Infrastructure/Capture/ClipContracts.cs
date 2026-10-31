@@ -25,7 +25,8 @@ public sealed record ClipManifestV1(
     int ArchiveAttemptCount = 0,
     DateTimeOffset? ArchiveNextAttemptAt = null,
     DateTimeOffset? ArchivedAt = null,
-    string? ArchiveManifestSha256 = null);
+    string? ArchiveManifestSha256 = null,
+    string? PublicId = null);
 
 public interface IClipMediaAssembler
 {

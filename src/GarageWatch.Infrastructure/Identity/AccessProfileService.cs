@@ -5,10 +5,10 @@ using Microsoft.EntityFrameworkCore;
 
 namespace GarageWatch.Infrastructure.Identity;
 
-public sealed record AccessProfileSummary(Guid Id, Guid CurrentVersionId, string Name, bool IsActive, long Version,
+public sealed record AccessProfileSummary(string PublicId, string CurrentVersionPublicId, string Name, bool IsActive, long Version,
     DateTimeOffset UpdatedAtUtc, IReadOnlyList<string> PermissionKeys);
 
-public sealed record AccessProfileAssignmentSummary(Guid AssignmentId, Guid ProfileId, Guid ProfileVersionId, string ProfileName,
+public sealed record AccessProfileAssignmentSummary(string AssignmentPublicId, string ProfilePublicId, string ProfileVersionPublicId, string ProfileName,
     long ProfileVersion, IReadOnlyList<PermissionScope> Scopes, DateTimeOffset AssignedAtUtc);
 
 public sealed class AccessProfileService(
@@ -17,6 +17,7 @@ public sealed class AccessProfileService(
     IIamAuditEventRepository audit,
     UserManager<ApplicationUser> users,
     IPermissionEvaluator evaluator,
+    IPublicIdGenerator publicIds,
     TimeProvider timeProvider)
 {
     public async Task<IReadOnlyList<AccessProfileSummary>> ListAsync(CancellationToken cancellationToken)
@@ -27,7 +28,7 @@ public sealed class AccessProfileService(
         return profiles.Select(profile =>
         {
             var current = profile.Versions.Single(version => version.Version == profile.Version);
-            return new AccessProfileSummary(profile.Id, current.Id, profile.Name, profile.IsActive, profile.Version,
+            return new AccessProfileSummary(profile.PublicId!, current.PublicId!, profile.Name, profile.IsActive, profile.Version,
                 profile.UpdatedAtUtc, current.Permissions.Select(permission => permission.PermissionKey)
                     .Order(StringComparer.Ordinal).ToArray());
         }).ToArray();
@@ -45,16 +46,17 @@ public sealed class AccessProfileService(
         var profile = new AccessProfile
         {
             Id = Guid.NewGuid(),
+            PublicId = publicIds.Generate(PublicIdPrefixes.AccessProfilePrefix),
             Name = normalized,
             Version = 1,
             CreatedAtUtc = now,
             UpdatedAtUtc = now
         };
-        var version = NewVersion(profile.Id, 1, actorId, now, permissions);
+        var version = NewVersion(profile.Id, 1, actorId, now, permissions, publicIds);
         database.AccessProfiles.Add(profile);
         database.AccessProfileVersions.Add(version);
         audit.Append(actorId, actorId, "access_profile.created", profile.Id.ToString("D"), now);
-        return Map(profile, version.Id, permissions);
+        return Map(profile, version, permissions);
     }, cancellationToken);
 
     public Task<AccessProfileSummary> PublishVersionAsync(Guid actorId, Guid profileId, long expectedVersion,
@@ -70,12 +72,12 @@ public sealed class AccessProfileService(
             if (profile.Version != expectedVersion) throw new InvalidOperationException("A versão do perfil mudou.");
             var next = checked(profile.Version + 1);
             var now = timeProvider.GetUtcNow();
-            var published = NewVersion(profile.Id, next, actorId, now, permissions);
+            var published = NewVersion(profile.Id, next, actorId, now, permissions, publicIds);
             database.AccessProfileVersions.Add(published);
             profile.Version = next;
             profile.UpdatedAtUtc = now;
             audit.Append(actorId, actorId, "access_profile.version_published", profile.Id.ToString("D"), now);
-            return Map(profile, published.Id, permissions);
+            return Map(profile, published, permissions);
         }, cancellationToken);
 
     public Task ReplaceAssignmentsAsync(Guid actorId, Guid userId,
@@ -115,6 +117,7 @@ public sealed class AccessProfileService(
                 var assignment = new UserAccessProfileAssignment
                 {
                     Id = Guid.NewGuid(),
+                    PublicId = publicIds.Generate(PublicIdPrefixes.ProfileAssignmentPrefix),
                     UserId = userId,
                     AccessProfileVersionId = item.ProfileVersionId,
                     AssignedByUserId = actorId,
@@ -142,10 +145,20 @@ public sealed class AccessProfileService(
             .Include(item => item.Scopes)
             .Where(item => item.UserId == userId && item.RevokedAtUtc == null && item.ProfileVersion!.Profile!.IsActive)
             .OrderBy(item => item.ProfileVersion!.Profile!.Name).ToArrayAsync(cancellationToken);
-        return assignments.Select(item => new AccessProfileAssignmentSummary(item.Id,
-            item.ProfileVersion!.ProfileId, item.AccessProfileVersionId, item.ProfileVersion.Profile!.Name,
-            item.ProfileVersion.Version, item.Scopes.Select(scope => new PermissionScope(scope.ContextId, scope.CameraId)).ToArray(),
-            item.AssignedAtUtc)).ToArray();
+        var cameras = await database.CameraCatalog.AsNoTracking().Select(camera => new
+        {
+            camera.ContextId,
+            camera.CameraId,
+            camera.PublicId,
+            ContextPublicId = camera.Context.PublicId
+        }).ToDictionaryAsync(camera => (camera.ContextId, camera.CameraId), cancellationToken);
+        return assignments.Select(item => new AccessProfileAssignmentSummary(item.PublicId!,
+            item.ProfileVersion!.Profile!.PublicId!, item.ProfileVersion.PublicId!, item.ProfileVersion.Profile.Name,
+            item.ProfileVersion.Version, item.Scopes.Select(scope =>
+            {
+                var camera = cameras[(scope.ContextId, scope.CameraId)];
+                return new PermissionScope(camera.ContextPublicId!, camera.PublicId!);
+            }).ToArray(), item.AssignedAtUtc)).ToArray();
     }
 
     public async Task<AuthorizationSubject> GetSubjectAsync(Guid userId, CancellationToken cancellationToken)
@@ -195,11 +208,12 @@ public sealed class AccessProfileService(
     }
 
     private static AccessProfileVersion NewVersion(Guid profileId, long version, Guid actorId,
-        DateTimeOffset now, IReadOnlyCollection<string> keys)
+        DateTimeOffset now, IReadOnlyCollection<string> keys, IPublicIdGenerator publicIds)
     {
         var result = new AccessProfileVersion
         {
             Id = Guid.NewGuid(),
+            PublicId = publicIds.Generate(PublicIdPrefixes.AccessProfileVersionPrefix),
             ProfileId = profileId,
             Version = version,
             CreatedByUserId = actorId,
@@ -241,8 +255,8 @@ public sealed class AccessProfileService(
         return normalized;
     }
 
-    private static AccessProfileSummary Map(AccessProfile profile, Guid currentVersionId, IReadOnlyList<string> keys) =>
-        new(profile.Id, currentVersionId, profile.Name, profile.IsActive, profile.Version, profile.UpdatedAtUtc, keys);
+    private static AccessProfileSummary Map(AccessProfile profile, AccessProfileVersion version, IReadOnlyList<string> keys) =>
+        new(profile.PublicId!, version.PublicId!, profile.Name, profile.IsActive, profile.Version, profile.UpdatedAtUtc, keys);
 }
 
 public sealed record ProfileAssignmentRequest(Guid ProfileVersionId, IReadOnlyList<PermissionScope> Scopes);

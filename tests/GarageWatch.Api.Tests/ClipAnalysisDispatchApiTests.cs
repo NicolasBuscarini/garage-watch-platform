@@ -14,34 +14,115 @@ namespace GarageWatch.Api.Tests;
 public sealed class ClipAnalysisDispatchApiTests
 {
     [Fact]
+    public async Task Clip_trigger_configuration_is_per_camera_persisted_versioned_and_applies_immediately()
+    {
+        await using var factory = new ApiFactory();
+        var internalCameraId = factory.Services.GetRequiredService<CaptureOptions>().CameraId;
+        var publicCameraId = await GetCameraPublicIdAsync(factory);
+        using (var anonymous = factory.CreateClient())
+        {
+            using var denied = await anonymous.GetAsync($"/api/v1/admin/cameras/{publicCameraId}/clip-trigger");
+            Assert.Equal(HttpStatusCode.Unauthorized, denied.StatusCode);
+        }
+        using (var scope = factory.Services.CreateScope())
+        {
+            var users = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
+            var user = new ApplicationUser { Id = Guid.NewGuid(), UserName = "trigger-viewer", IsActive = true };
+            Assert.True((await users.CreateAsync(user, "Trigger-Viewer-Password-123!")).Succeeded);
+            Assert.True((await users.AddToRoleAsync(user, "User")).Succeeded);
+        }
+        using (var nonAdmin = await LoginAsync(factory, "trigger-viewer", "Trigger-Viewer-Password-123!"))
+        {
+            nonAdmin.DefaultRequestHeaders.Add("Origin", "http://localhost");
+            using var denied = await nonAdmin.PutAsJsonAsync($"/api/v1/admin/cameras/{publicCameraId}/clip-trigger",
+                new { expectedVersion = 0, enabled = true });
+            Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
+        }
+        using var admin = await LoginAsync(factory, "contract-user", "Contract-Password-123!");
+        using (var missingOrigin = await LoginAsync(factory, "contract-user", "Contract-Password-123!"))
+        {
+            using var denied = await missingOrigin.PutAsJsonAsync($"/api/v1/admin/cameras/{publicCameraId}/clip-trigger",
+                new { expectedVersion = 0, enabled = true });
+            Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
+            missingOrigin.DefaultRequestHeaders.Add("Origin", "https://attacker.invalid");
+            using var crossOrigin = await missingOrigin.PutAsJsonAsync($"/api/v1/admin/cameras/{publicCameraId}/clip-trigger",
+                new { expectedVersion = 0, enabled = true });
+            Assert.Equal(HttpStatusCode.Forbidden, crossOrigin.StatusCode);
+        }
+        admin.DefaultRequestHeaders.Add("Origin", "http://localhost");
+
+        using var initial = await admin.GetAsync($"/api/v1/admin/cameras/{publicCameraId}/clip-trigger");
+        Assert.Equal(HttpStatusCode.OK, initial.StatusCode);
+        var initialBody = await initial.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.False(initialBody.GetProperty("enabled").GetBoolean());
+        Assert.Equal(0, initialBody.GetProperty("version").GetInt64());
+
+        using var enabled = await admin.PutAsJsonAsync($"/api/v1/admin/cameras/{publicCameraId}/clip-trigger",
+            new { expectedVersion = 0, enabled = true });
+        Assert.Equal(HttpStatusCode.OK, enabled.StatusCode);
+        var enabledBody = await enabled.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.True(enabledBody.GetProperty("enabled").GetBoolean());
+        Assert.Equal(1, enabledBody.GetProperty("version").GetInt64());
+        using (var scope = factory.Services.CreateScope())
+            Assert.True(await scope.ServiceProvider.GetRequiredService<CameraClipTriggerConfigurationService>()
+                .IsEnabledAsync(internalCameraId, CancellationToken.None));
+
+        using var stale = await admin.PutAsJsonAsync($"/api/v1/admin/cameras/{publicCameraId}/clip-trigger",
+            new { expectedVersion = 0, enabled = false });
+        Assert.Equal(HttpStatusCode.Conflict, stale.StatusCode);
+        using var disabled = await admin.PutAsJsonAsync($"/api/v1/admin/cameras/{publicCameraId}/clip-trigger",
+            new { expectedVersion = 1, enabled = false });
+        Assert.Equal(HttpStatusCode.OK, disabled.StatusCode);
+        using (var scope = factory.Services.CreateScope())
+            Assert.False(await scope.ServiceProvider.GetRequiredService<CameraClipTriggerConfigurationService>()
+                .IsEnabledAsync(internalCameraId, CancellationToken.None));
+        using (var scope = factory.Services.CreateScope())
+        {
+            var database = scope.ServiceProvider.GetRequiredService<IamDbContext>();
+            Assert.Equal(2, await database.IamAuditEvents.CountAsync(item =>
+                item.Action == "clip.trigger.configuration.updated"));
+        }
+    }
+
+    [Fact]
     public async Task Authorized_manual_request_is_deduplicated_and_never_rejects_even_administrator()
     {
         await using var factory = new ApiFactory();
         var cameraId = factory.Services.GetRequiredService<CaptureOptions>().CameraId;
+        var cameraPublicId = await GetCameraPublicIdAsync(factory);
         var clip = await PersistReadyClipAsync(factory, cameraId);
         using var admin = await LoginAsync(factory, "contract-user", "Contract-Password-123!");
         admin.DefaultRequestHeaders.Add("Origin", "http://localhost");
+        using var legacyCameraPolicy = await admin.PutAsJsonAsync($"/api/v1/cameras/{cameraId}/clip-analysis-dispatch-policy",
+            new { expectedVersion = 0, policy = "manual_only" });
+        Assert.Equal(HttpStatusCode.NotFound, legacyCameraPolicy.StatusCode);
 
-        using var policy = await admin.PutAsJsonAsync($"/api/v1/cameras/{cameraId}/clip-analysis-dispatch-policy",
+        using var policy = await admin.PutAsJsonAsync($"/api/v1/cameras/{cameraPublicId}/clip-analysis-dispatch-policy",
             new { expectedVersion = 0, policy = "manual_only" });
         Assert.Equal(HttpStatusCode.OK, policy.StatusCode);
         var policyBody = await policy.Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal(1, policyBody.GetProperty("version").GetInt64());
+        using var readPolicy = await admin.GetAsync($"/api/v1/cameras/{cameraPublicId}/clip-analysis-dispatch-policy");
+        Assert.Equal(HttpStatusCode.OK, readPolicy.StatusCode);
+        var readPolicyBody = await readPolicy.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("manual_only", readPolicyBody.GetProperty("policy").GetString());
+        Assert.True(readPolicyBody.GetProperty("canRequest").GetBoolean());
+        Assert.True(readPolicyBody.GetProperty("canManage").GetBoolean());
 
         var key = Guid.NewGuid();
-        using var first = await admin.PostAsJsonAsync($"/api/v1/clips/{clip.ClipId}/analysis-requests",
+        using var first = await admin.PostAsJsonAsync($"/api/v1/clips/{clip.PublicId}/analysis-requests",
             new { idempotencyKey = key, analysisVersion = "contract-v1" });
         Assert.Equal(HttpStatusCode.Accepted, first.StatusCode);
-        using var retry = await admin.PostAsJsonAsync($"/api/v1/clips/{clip.ClipId}/analysis-requests",
+        using var retry = await admin.PostAsJsonAsync($"/api/v1/clips/{clip.PublicId}/analysis-requests",
             new { idempotencyKey = key, analysisVersion = "contract-v1" });
         Assert.Equal(HttpStatusCode.Accepted, retry.StatusCode);
         var retried = await retry.Content.ReadFromJsonAsync<JsonElement>();
         Assert.True(retried.GetProperty("existing").GetBoolean());
 
-        using var never = await admin.PutAsJsonAsync($"/api/v1/cameras/{cameraId}/clip-analysis-dispatch-policy",
+        using var never = await admin.PutAsJsonAsync($"/api/v1/cameras/{cameraPublicId}/clip-analysis-dispatch-policy",
             new { expectedVersion = 1, policy = "never" });
         Assert.Equal(HttpStatusCode.OK, never.StatusCode);
-        using var denied = await admin.PostAsJsonAsync($"/api/v1/clips/{clip.ClipId}/analysis-requests",
+        using var denied = await admin.PostAsJsonAsync($"/api/v1/clips/{clip.PublicId}/analysis-requests",
             new { idempotencyKey = Guid.NewGuid(), analysisVersion = "contract-v2" });
         Assert.Equal(HttpStatusCode.Conflict, denied.StatusCode);
 
@@ -59,37 +140,45 @@ public sealed class ClipAnalysisDispatchApiTests
         Guid adminId;
         Guid operatorId;
         string cameraId;
+        string cameraPublicId;
         using (var scope = factory.Services.CreateScope())
         {
             var services = scope.ServiceProvider;
             var users = services.GetRequiredService<UserManager<ApplicationUser>>();
             adminId = (await users.FindByNameAsync("contract-user"))!.Id;
             cameraId = services.GetRequiredService<CaptureOptions>().CameraId;
+            cameraPublicId = await GetCameraPublicIdAsync(factory);
             var user = new ApplicationUser { Id = Guid.NewGuid(), UserName = "clip-operator", IsActive = true };
             Assert.True((await users.CreateAsync(user, "Clip-Operator-Password-123!")).Succeeded);
             Assert.True((await users.AddToRoleAsync(user, "User")).Succeeded);
             operatorId = user.Id;
             var profiles = services.GetRequiredService<AccessProfileService>();
-            var requestOnly = await profiles.CreateAsync(adminId, "Clip request only", ["clips.analysis.request"],
+            var requestOnly = await profiles.CreateAsync(adminId, "Clip request only", ["clips.read", "clips.analysis.request"],
                 CancellationToken.None);
             await profiles.ReplaceAssignmentsAsync(adminId, operatorId,
-                [new ProfileAssignmentRequest(requestOnly.CurrentVersionId, [new("garage", cameraId)])],
+                [new ProfileAssignmentRequest(await GetVersionIdAsync(services, requestOnly.CurrentVersionPublicId), [new("garage", cameraId)])],
                 CancellationToken.None);
         }
         var clip = await PersistReadyClipAsync(factory, cameraId);
         using var admin = await LoginAsync(factory, "contract-user", "Contract-Password-123!");
         admin.DefaultRequestHeaders.Add("Origin", "http://localhost");
-        using var policy = await admin.PutAsJsonAsync($"/api/v1/cameras/{cameraId}/clip-analysis-dispatch-policy",
+        using var policy = await admin.PutAsJsonAsync($"/api/v1/cameras/{cameraPublicId}/clip-analysis-dispatch-policy",
             new { expectedVersion = 0, policy = "manual_only" });
         Assert.Equal(HttpStatusCode.OK, policy.StatusCode);
 
         using var operatorClient = await LoginAsync(factory, "clip-operator", "Clip-Operator-Password-123!");
         operatorClient.DefaultRequestHeaders.Add("Origin", "http://localhost");
-        using var request = await operatorClient.PostAsJsonAsync($"/api/v1/clips/{clip.ClipId}/analysis-requests",
+        using var readPolicy = await operatorClient.GetAsync(
+            $"/api/v1/cameras/{cameraPublicId}/clip-analysis-dispatch-policy");
+        Assert.Equal(HttpStatusCode.OK, readPolicy.StatusCode);
+        var policyView = await readPolicy.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.True(policyView.GetProperty("canRequest").GetBoolean());
+        Assert.False(policyView.GetProperty("canManage").GetBoolean());
+        using var request = await operatorClient.PostAsJsonAsync($"/api/v1/clips/{clip.PublicId}/analysis-requests",
             new { idempotencyKey = Guid.NewGuid() });
         Assert.Equal(HttpStatusCode.Accepted, request.StatusCode);
         using var manageDenied = await operatorClient.PutAsJsonAsync(
-            $"/api/v1/cameras/{cameraId}/clip-analysis-dispatch-policy", new { expectedVersion = 1, policy = "always" });
+            $"/api/v1/cameras/{cameraPublicId}/clip-analysis-dispatch-policy", new { expectedVersion = 1, policy = "always" });
         Assert.Equal(HttpStatusCode.Forbidden, manageDenied.StatusCode);
     }
 
@@ -98,10 +187,11 @@ public sealed class ClipAnalysisDispatchApiTests
     {
         await using var factory = new ApiFactory();
         var cameraId = factory.Services.GetRequiredService<CaptureOptions>().CameraId;
+        var cameraPublicId = await GetCameraPublicIdAsync(factory);
         var clip = await PersistReadyClipAsync(factory, cameraId);
         using var admin = await LoginAsync(factory, "contract-user", "Contract-Password-123!");
         admin.DefaultRequestHeaders.Add("Origin", "http://localhost");
-        using var policy = await admin.PutAsJsonAsync($"/api/v1/cameras/{cameraId}/clip-analysis-dispatch-policy",
+        using var policy = await admin.PutAsJsonAsync($"/api/v1/cameras/{cameraPublicId}/clip-analysis-dispatch-policy",
             new { expectedVersion = 0, policy = "always" });
         Assert.Equal(HttpStatusCode.OK, policy.StatusCode);
 
@@ -117,7 +207,7 @@ public sealed class ClipAnalysisDispatchApiTests
 
         var reclaimed = await dispatch.ClaimNextAsync(CancellationToken.None);
         Assert.NotNull(reclaimed);
-        Assert.Equal(lease!.JobId, reclaimed!.JobId);
+        Assert.Equal(lease!.PublicId, reclaimed!.PublicId);
         Assert.Equal(2, (await database.ClipAnalysisJobs.SingleAsync()).AttemptCount);
 
         await dispatch.AutoRequestAsync(clip, CancellationToken.None);
@@ -131,12 +221,14 @@ public sealed class ClipAnalysisDispatchApiTests
         Guid adminId;
         Guid operatorId;
         string cameraId;
+        string cameraPublicId;
         using (var seedScope = factory.Services.CreateScope())
         {
             var services = seedScope.ServiceProvider;
             var users = services.GetRequiredService<UserManager<ApplicationUser>>();
             adminId = (await users.FindByNameAsync("contract-user"))!.Id;
             cameraId = services.GetRequiredService<CaptureOptions>().CameraId;
+            cameraPublicId = await GetCameraPublicIdAsync(factory);
             var seedDatabase = services.GetRequiredService<IamDbContext>();
             seedDatabase.CameraCatalog.Add(new CameraCatalogEntry
             {
@@ -157,23 +249,23 @@ public sealed class ClipAnalysisDispatchApiTests
             var requestOnly = await profiles.CreateAsync(adminId, "Crossed request only",
                 ["clips.analysis.request"], CancellationToken.None);
             await profiles.ReplaceAssignmentsAsync(adminId, operatorId,
-                [new ProfileAssignmentRequest(requestOnly.CurrentVersionId, [new("garage", "other-camera")])],
+                [new ProfileAssignmentRequest(await GetVersionIdAsync(services, requestOnly.CurrentVersionPublicId), [new("garage", "other-camera")])],
                 CancellationToken.None);
         }
 
         var clip = await PersistReadyClipAsync(factory, cameraId);
         using var admin = await LoginAsync(factory, "contract-user", "Contract-Password-123!");
         admin.DefaultRequestHeaders.Add("Origin", "http://localhost");
-        using var manual = await admin.PutAsJsonAsync($"/api/v1/cameras/{cameraId}/clip-analysis-dispatch-policy",
+        using var manual = await admin.PutAsJsonAsync($"/api/v1/cameras/{cameraPublicId}/clip-analysis-dispatch-policy",
             new { expectedVersion = 0, policy = "manual_only" });
         Assert.Equal(HttpStatusCode.OK, manual.StatusCode);
-        using var stale = await admin.PutAsJsonAsync($"/api/v1/cameras/{cameraId}/clip-analysis-dispatch-policy",
+        using var stale = await admin.PutAsJsonAsync($"/api/v1/cameras/{cameraPublicId}/clip-analysis-dispatch-policy",
             new { expectedVersion = 0, policy = "always" });
         Assert.Equal(HttpStatusCode.Conflict, stale.StatusCode);
 
         using var crossed = await LoginAsync(factory, "crossed-operator", "Crossed-Operator-Password-123!");
         crossed.DefaultRequestHeaders.Add("Origin", "http://localhost");
-        using var denied = await crossed.PostAsJsonAsync($"/api/v1/clips/{clip.ClipId}/analysis-requests",
+        using var denied = await crossed.PostAsJsonAsync($"/api/v1/clips/{clip.PublicId}/analysis-requests",
             new { idempotencyKey = Guid.NewGuid() });
         Assert.Equal(HttpStatusCode.NotFound, denied.StatusCode);
 
@@ -191,10 +283,11 @@ public sealed class ClipAnalysisDispatchApiTests
     {
         await using var factory = new ApiFactory();
         var cameraId = factory.Services.GetRequiredService<CaptureOptions>().CameraId;
+        var cameraPublicId = await GetCameraPublicIdAsync(factory);
         var clip = await PersistReadyClipAsync(factory, cameraId);
         using var admin = await LoginAsync(factory, "contract-user", "Contract-Password-123!");
         admin.DefaultRequestHeaders.Add("Origin", "http://localhost");
-        using var policy = await admin.PutAsJsonAsync($"/api/v1/cameras/{cameraId}/clip-analysis-dispatch-policy",
+        using var policy = await admin.PutAsJsonAsync($"/api/v1/cameras/{cameraPublicId}/clip-analysis-dispatch-policy",
             new { expectedVersion = 0, policy = "manual_only" });
         Assert.Equal(HttpStatusCode.OK, policy.StatusCode);
 
@@ -218,7 +311,7 @@ public sealed class ClipAnalysisDispatchApiTests
             await database.SaveChangesAsync();
         }
 
-        using var rejected = await admin.PostAsJsonAsync($"/api/v1/clips/{clip.ClipId}/analysis-requests",
+        using var rejected = await admin.PostAsJsonAsync($"/api/v1/clips/{clip.PublicId}/analysis-requests",
             new { idempotencyKey = Guid.NewGuid() });
         Assert.Equal(HttpStatusCode.Conflict, rejected.StatusCode);
         using var checkScope = factory.Services.CreateScope();
@@ -240,10 +333,23 @@ public sealed class ClipAnalysisDispatchApiTests
         var hash = Convert.ToHexString(await SHA256.HashDataAsync(mediaStream)).ToLowerInvariant();
         var now = DateTimeOffset.UtcNow;
         var clip = new ClipManifestV1("1.0", clipId, cameraId, now, now, now, now, "ready", "trigger-v1",
-            "visual_change:test", [], mediaName, hash, null, null, 1, now);
+            "visual_change:test", [], mediaName, hash, null, null, 1, now,
+            PublicId: new PublicIdGenerator().Generate(PublicIdPrefixes.ClipPrefix));
         await File.WriteAllTextAsync(Path.Combine(manifestDirectory, $"{clipId}.json"),
             JsonSerializer.Serialize(clip, new JsonSerializerOptions(JsonSerializerDefaults.Web)));
         return clip;
+    }
+
+    private static async Task<Guid> GetVersionIdAsync(IServiceProvider services, string publicId) =>
+        await services.GetRequiredService<IamDbContext>().AccessProfileVersions
+            .Where(item => item.PublicId == publicId).Select(item => item.Id).SingleAsync();
+
+    private static async Task<string> GetCameraPublicIdAsync(ApiFactory factory)
+    {
+        using var scope = factory.Services.CreateScope();
+        var internalId = factory.Services.GetRequiredService<CaptureOptions>().CameraId;
+        return (await scope.ServiceProvider.GetRequiredService<IamDbContext>().CameraCatalog
+            .Where(item => item.CameraId == internalId).Select(item => item.PublicId).SingleAsync())!;
     }
 
     private static async Task<HttpClient> LoginAsync(ApiFactory factory, string username, string password)

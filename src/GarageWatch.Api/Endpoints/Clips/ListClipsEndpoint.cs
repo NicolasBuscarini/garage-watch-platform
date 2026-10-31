@@ -21,7 +21,7 @@ public sealed class ListClipsEndpoint() : BaseEndpoint("Clips", "ListClips", "Li
             {
                 var result = await library.ListAsync(user.Id, admin, cameraId, fromUtc, toUtc, state,
                     page ?? 1, pageSize ?? 25, cancellationToken);
-                var items = result.Items.Select(item => new ClipListItemResponse(item.ClipId, item.CameraId,
+                var items = result.Items.Select(item => new ClipListItemResponse(item.PublicId, item.CameraId,
                     item.StartedAtUtc, item.EndedAtUtc, item.State, item.ArchiveStatus, item.AnalysisStatus,
                     item.ThumbnailUrl, item.SizeBytes, item.TriggerReason, item.TriggerConfigVersion)).ToArray();
                 return Results.Ok(new ClipPageResponse(items, result.Page, result.PageSize, result.Total));

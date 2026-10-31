@@ -38,9 +38,8 @@ public sealed record ClipTriggerOptions(bool Enabled, int SampleFps, int Width, 
             return new NormalizedRectangle(values[0], values[1], values[2], values[3]);
         }
 
-        if (!bool.TryParse(configuration["CLIP_TRIGGER_ENABLED"] ?? "false", out var enabled))
-            throw new InvalidOperationException("CLIP_TRIGGER_ENABLED deve ser true ou false.");
-        return new ClipTriggerOptions(enabled,
+        // Enablement is persisted per camera; the legacy environment switch must never enable production capture.
+        return new ClipTriggerOptions(false,
             Number(configuration, "CLIP_TRIGGER_SAMPLE_FPS", 1, 1, 5),
             Number(configuration, "CLIP_TRIGGER_WIDTH", 160, 64, 320),
             Number(configuration, "CLIP_TRIGGER_HEIGHT", 90, 64, 180),

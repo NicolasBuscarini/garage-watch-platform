@@ -140,10 +140,15 @@ public sealed class IamTests
         Guid viewerId;
         Guid administratorId;
         string cameraId;
+        string viewerPublicId;
+        string administratorPublicId;
+        string cameraPublicId;
+        string contextPublicId;
         using (var scope = factory.Services.CreateScope())
         {
             var users = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
             administratorId = (await users.FindByNameAsync("contract-user"))!.Id;
+            administratorPublicId = (await users.FindByNameAsync("contract-user"))!.PublicId!;
             cameraId = scope.ServiceProvider.GetRequiredService<GarageWatch.Infrastructure.Capture.CaptureOptions>().CameraId;
             var viewer = new ApplicationUser
             {
@@ -155,6 +160,11 @@ public sealed class IamTests
             Assert.True((await users.CreateAsync(viewer, "Viewer-Password-123!")).Succeeded);
             Assert.True((await users.AddToRoleAsync(viewer, "User")).Succeeded);
             viewerId = viewer.Id;
+            viewerPublicId = viewer.PublicId!;
+            var camera = await scope.ServiceProvider.GetRequiredService<IamDbContext>().CameraCatalog
+                .Include(item => item.Context).SingleAsync(item => item.CameraId == cameraId);
+            cameraPublicId = camera.PublicId!;
+            contextPublicId = camera.Context.PublicId!;
         }
 
         using var page = await admin.GetAsync("/api/v1/admin/users?page=1&pageSize=1");
@@ -165,21 +175,21 @@ public sealed class IamTests
         Assert.DoesNotContain("private@example.invalid", await page.Content.ReadAsStringAsync());
 
         using var filteredPage = await admin.GetAsync(
-            $"/api/v1/admin/users?userId={viewerId}&page=1&pageSize=1");
+            $"/api/v1/admin/users?userId={viewerPublicId}&page=1&pageSize=1");
         Assert.Equal(System.Net.HttpStatusCode.OK, filteredPage.StatusCode);
         var filteredBody = await filteredPage.Content.ReadFromJsonAsync<JsonElement>();
         var filteredUser = Assert.Single(filteredBody.GetProperty("items").EnumerateArray());
-        Assert.Equal(viewerId, filteredUser.GetProperty("id").GetGuid());
+        Assert.Equal(viewerPublicId, filteredUser.GetProperty("publicId").GetString());
         Assert.Equal("admin-api-viewer", filteredUser.GetProperty("userName").GetString());
         Assert.Equal(1, filteredBody.GetProperty("totalCount").GetInt32());
 
         using var filteredPastEnd = await admin.GetAsync(
-            $"/api/v1/admin/users?userId={viewerId}&page=2&pageSize=1");
+            $"/api/v1/admin/users?userId={viewerPublicId}&page=2&pageSize=1");
         var filteredPastEndBody = await filteredPastEnd.Content.ReadFromJsonAsync<JsonElement>();
         Assert.Empty(filteredPastEndBody.GetProperty("items").EnumerateArray());
         Assert.Equal(1, filteredPastEndBody.GetProperty("totalCount").GetInt32());
 
-        using var detail = await admin.GetAsync($"/api/v1/admin/users/{viewerId}");
+        using var detail = await admin.GetAsync($"/api/v1/admin/users/{viewerPublicId}");
         Assert.Equal(System.Net.HttpStatusCode.OK, detail.StatusCode);
         Assert.DoesNotContain("private@example.invalid", await detail.Content.ReadAsStringAsync());
         using var viewerClient = factory.CreateClient();
@@ -195,26 +205,26 @@ public sealed class IamTests
         var profiles = await profileResponse.Content.ReadFromJsonAsync<JsonElement>();
         var videoProfile = profiles.EnumerateArray().Single(item =>
             item.GetProperty("name").GetString() == "Live somente vídeo");
-        var profileVersionId = videoProfile.GetProperty("currentVersionId").GetGuid();
+        var profileVersionId = videoProfile.GetProperty("currentVersionPublicId").GetString()!;
         using var staleOrigin = factory.CreateClient();
         staleOrigin.DefaultRequestHeaders.Add("Cookie", Assert.Single(login.Headers.GetValues("Set-Cookie")).Split(';', 2)[0]);
-        using var csrfDenied = await staleOrigin.PutAsJsonAsync($"/api/v1/admin/users/{viewerId}/access-rules",
+        using var csrfDenied = await staleOrigin.PutAsJsonAsync($"/api/v1/admin/users/{viewerPublicId}/access-rules",
             new { assignments = Array.Empty<object>() });
         Assert.Equal(System.Net.HttpStatusCode.Forbidden, csrfDenied.StatusCode);
 
-        using var profileAssignment = await admin.PutAsJsonAsync($"/api/v1/admin/users/{viewerId}/access-rules",
-            new { assignments = new[] { new { profileVersionId, scopes = new[] { new { contextId = "garage", cameraId } } } } });
+        using var profileAssignment = await admin.PutAsJsonAsync($"/api/v1/admin/users/{viewerPublicId}/access-rules",
+            new { assignments = new[] { new { profileVersionPublicId = profileVersionId, scopes = new[] { new { contextId = contextPublicId, cameraId = cameraPublicId } } } } });
         Assert.Equal(System.Net.HttpStatusCode.NoContent, profileAssignment.StatusCode);
         Assert.Equal(System.Net.HttpStatusCode.Unauthorized,
             (await viewerClient.GetAsync("/api/v1/auth/me")).StatusCode);
-        using var legacyRolesRoute = await admin.PutAsJsonAsync($"/api/v1/admin/users/{viewerId}/roles",
+        using var legacyRolesRoute = await admin.PutAsJsonAsync($"/api/v1/admin/users/{viewerPublicId}/roles",
             new { roles = new[] { "Viewer" } });
         Assert.Equal(System.Net.HttpStatusCode.NotFound, legacyRolesRoute.StatusCode);
-        using var updatedDetail = await admin.GetAsync($"/api/v1/admin/users/{viewerId}");
+        using var updatedDetail = await admin.GetAsync($"/api/v1/admin/users/{viewerPublicId}");
         var detailBody = await updatedDetail.Content.ReadFromJsonAsync<JsonElement>();
-        Assert.Equal(profileVersionId, detailBody.GetProperty("accessProfiles")[0].GetProperty("profileVersionId").GetGuid());
-        Assert.Equal(cameraId, detailBody.GetProperty("accessProfiles")[0].GetProperty("scopes")[0].GetProperty("cameraId").GetString());
-        using var deactivate = await admin.DeleteAsync($"/api/v1/admin/users/{viewerId}");
+        Assert.Equal(profileVersionId, detailBody.GetProperty("accessProfiles")[0].GetProperty("profileVersionPublicId").GetString());
+        Assert.Equal(cameraPublicId, detailBody.GetProperty("accessProfiles")[0].GetProperty("scopes")[0].GetProperty("cameraId").GetString());
+        using var deactivate = await admin.DeleteAsync($"/api/v1/admin/users/{viewerPublicId}");
         Assert.Equal(System.Net.HttpStatusCode.NoContent, deactivate.StatusCode);
         using (var scope = factory.Services.CreateScope())
         {
@@ -229,8 +239,8 @@ public sealed class IamTests
         Assert.Equal(System.Net.HttpStatusCode.Unauthorized, inactiveLogin.StatusCode);
 
         using var selfProfiles = await admin.PutAsJsonAsync(
-            $"/api/v1/admin/users/{administratorId}/access-rules",
-            new { assignments = new[] { new { profileVersionId, scopes = new[] { new { contextId = "garage", cameraId } } } } });
+            $"/api/v1/admin/users/{administratorPublicId}/access-rules",
+            new { assignments = new[] { new { profileVersionPublicId = profileVersionId, scopes = new[] { new { contextId = contextPublicId, cameraId = cameraPublicId } } } } });
         Assert.Equal(System.Net.HttpStatusCode.Conflict, selfProfiles.StatusCode);
     }
 

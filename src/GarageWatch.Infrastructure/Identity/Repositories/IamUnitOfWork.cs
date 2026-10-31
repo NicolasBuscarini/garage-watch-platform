@@ -1,4 +1,5 @@
 using GarageWatch.Application.Identity;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 
 namespace GarageWatch.Infrastructure.Identity.Repositories;
@@ -10,6 +11,7 @@ public sealed class IamTransactionGate
 
 public sealed class IamUnitOfWork(IamDbContext database, IamTransactionGate transactionGate) : IIamUnitOfWork
 {
+    private const int PublicIdCollisionAttempts = 3;
     private readonly AsyncLocal<bool> _isExecuting = new();
 
     public async Task<TResult> ExecuteAtomicallyAsync<TResult>(Func<CancellationToken, Task<TResult>> operation,
@@ -19,19 +21,39 @@ public sealed class IamUnitOfWork(IamDbContext database, IamTransactionGate tran
         if (_isExecuting.Value) throw new InvalidOperationException("Nested IAM UnitOfWork operations are not supported.");
         await transactionGate.Semaphore.WaitAsync(cancellationToken);
         _isExecuting.Value = true;
+        database.DeferPublicIdCollisionRetries = true;
         try
         {
-            await using var transaction = await database.Database.BeginTransactionAsync(cancellationToken);
-            var result = await operation(cancellationToken);
-            await database.SaveChangesAsync(cancellationToken);
-            await transaction.CommitAsync(cancellationToken);
-            return result;
+            for (var attempt = 1; ; attempt++)
+            {
+                try
+                {
+                    await using var transaction = await database.Database.BeginTransactionAsync(cancellationToken);
+                    var result = await operation(cancellationToken);
+                    await database.SaveChangesAsync(cancellationToken);
+                    await transaction.CommitAsync(cancellationToken);
+                    return result;
+                }
+                catch (DbUpdateException exception) when (IsPublicIdUniqueConstraint(exception))
+                {
+                    database.ChangeTracker.Clear();
+                    if (attempt >= PublicIdCollisionAttempts) throw;
+                }
+            }
         }
         finally
         {
+            database.DeferPublicIdCollisionRetries = false;
             _isExecuting.Value = false;
             transactionGate.Semaphore.Release();
         }
+    }
+
+    private static bool IsPublicIdUniqueConstraint(DbUpdateException exception)
+    {
+        var sqlite = exception.GetBaseException() as SqliteException;
+        return sqlite is { SqliteErrorCode: 19 } &&
+               sqlite.Message.Contains("PublicId", StringComparison.OrdinalIgnoreCase);
     }
 
     public async Task ExecuteAtomicallyAsync(Func<CancellationToken, Task> operation,

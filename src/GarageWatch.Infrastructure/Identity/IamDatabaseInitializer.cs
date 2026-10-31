@@ -1,6 +1,8 @@
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using System.Runtime.InteropServices;
+using System.Text.Json;
+using GarageWatch.Infrastructure.Capture;
 
 namespace GarageWatch.Infrastructure.Identity;
 
@@ -10,9 +12,11 @@ public sealed class IamDatabaseInitializer(
     RoleManager<IdentityRole<Guid>> roles,
     IdentityBootstrapOptions bootstrap,
     GarageWatch.Infrastructure.Capture.CaptureOptions captureOptions,
+    IPublicIdGenerator publicIds,
     TimeProvider timeProvider)
 {
     private static readonly string[] KnownRoles = ["User", "Viewer", "Administrator"];
+    private static readonly JsonSerializerOptions ManifestJsonOptions = new(JsonSerializerDefaults.Web);
 
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
@@ -25,6 +29,8 @@ public sealed class IamDatabaseInitializer(
                 UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
         }
         await database.Database.MigrateAsync(cancellationToken);
+        await BackfillPublicIdsAsync(cancellationToken);
+        await BackfillClipManifestPublicIdsAsync(cancellationToken);
         if (OperatingSystem.IsLinux() && File.Exists(databasePath))
             File.SetUnixFileMode(databasePath, UnixFileMode.UserRead | UnixFileMode.UserWrite);
         await using var transaction = await database.Database.BeginTransactionAsync(cancellationToken);
@@ -105,6 +111,62 @@ public sealed class IamDatabaseInitializer(
         await MigrateLegacyCameraGrantsAsync(cancellationToken);
 
         await transaction.CommitAsync(cancellationToken);
+    }
+
+    private async Task BackfillPublicIdsAsync(CancellationToken cancellationToken)
+    {
+        AssignPublicIds(await users.Users.ToArrayAsync(cancellationToken), PublicIdPrefixes.UserPrefix);
+        AssignPublicIds(await database.CameraContexts.ToArrayAsync(cancellationToken), PublicIdPrefixes.ContextPrefix);
+        AssignPublicIds(await database.CameraCatalog.ToArrayAsync(cancellationToken), PublicIdPrefixes.CameraPrefix);
+        AssignPublicIds(await database.AccessProfiles.ToArrayAsync(cancellationToken), PublicIdPrefixes.AccessProfilePrefix);
+        AssignPublicIds(await database.AccessProfileVersions.ToArrayAsync(cancellationToken), PublicIdPrefixes.AccessProfileVersionPrefix);
+        AssignPublicIds(await database.UserAccessProfileAssignments.ToArrayAsync(cancellationToken), PublicIdPrefixes.ProfileAssignmentPrefix);
+        AssignPublicIds(await database.AccessRequests.ToArrayAsync(cancellationToken), PublicIdPrefixes.AccessRequestPrefix);
+        AssignPublicIds(await database.ClipAnalysisJobs.ToArrayAsync(cancellationToken), PublicIdPrefixes.ClipAnalysisJobPrefix);
+
+        await database.SaveChangesAsync(cancellationToken);
+        var missingIds = await users.Users.AnyAsync(item => item.PublicId == null, cancellationToken)
+            || await database.CameraContexts.AnyAsync(item => item.PublicId == null, cancellationToken)
+            || await database.CameraCatalog.AnyAsync(item => item.PublicId == null, cancellationToken)
+            || await database.AccessProfiles.AnyAsync(item => item.PublicId == null, cancellationToken)
+            || await database.AccessProfileVersions.AnyAsync(item => item.PublicId == null, cancellationToken)
+            || await database.UserAccessProfileAssignments.AnyAsync(item => item.PublicId == null, cancellationToken)
+            || await database.AccessRequests.AnyAsync(item => item.PublicId == null, cancellationToken)
+            || await database.ClipAnalysisJobs.AnyAsync(item => item.PublicId == null, cancellationToken);
+        if (missingIds) throw new InvalidOperationException("Backfill de IDs públicos incompleto.");
+    }
+
+    private void AssignPublicIds<TEntity>(IReadOnlyCollection<TEntity> entities, string prefix)
+        where TEntity : class, IHasPublicId
+    {
+        var reservedIds = entities.Where(entity => entity.PublicId is not null)
+            .Select(entity => entity.PublicId!).ToHashSet(StringComparer.Ordinal);
+        if (entities.Any(entity => entity.PublicId is not null && !PublicIdFormat.IsValid(entity.PublicId, prefix)))
+            throw new InvalidDataException("Banco IAM contém ID público com formato inválido.");
+        foreach (var entity in entities.Where(entity => entity.PublicId is null))
+            entity.PublicId = PublicIdAllocator.GenerateUnique(publicIds, prefix, reservedIds);
+    }
+
+    private async Task BackfillClipManifestPublicIdsAsync(CancellationToken cancellationToken)
+    {
+        var directory = Path.Combine(captureOptions.SpoolDirectory, "clips", "manifests");
+        if (!Directory.Exists(directory)) return;
+        var reservedIds = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var path in Directory.EnumerateFiles(directory, "*.json").Order(StringComparer.Ordinal))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            ClipManifestV1? manifest;
+            try { manifest = JsonSerializer.Deserialize<ClipManifestV1>(await File.ReadAllTextAsync(path, cancellationToken), ManifestJsonOptions); }
+            catch (JsonException) { continue; }
+            if (manifest is not { SchemaVersion: "1.0" } ||
+                Path.GetFileName(path) != manifest.ClipId + ".json" || !LocalSegmentSpool.IsSafeSegmentId(manifest.ClipId)) continue;
+            if (PublicIdFormat.IsValid(manifest.PublicId, PublicIdPrefixes.ClipPrefix) &&
+                reservedIds.Add(manifest.PublicId!)) continue;
+            var updated = manifest with { PublicId = ClipPublicIdAllocator.GenerateUnique(publicIds, reservedIds) };
+            var temporary = path + ".public-id.tmp";
+            await File.WriteAllTextAsync(temporary, JsonSerializer.Serialize(updated, ManifestJsonOptions), cancellationToken);
+            File.Move(temporary, path, true);
+        }
     }
 
     private async Task MigrateLegacyCameraGrantsAsync(CancellationToken cancellationToken)

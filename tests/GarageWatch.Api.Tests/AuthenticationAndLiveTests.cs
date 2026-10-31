@@ -114,9 +114,11 @@ public sealed class AuthenticationAndLiveTests
         using var cameras = await session.GetAsync("/api/v1/cameras");
         Assert.Equal(HttpStatusCode.OK, cameras.StatusCode);
         var body = await cameras.Content.ReadAsStringAsync();
-        Assert.Contains("capture-test", body, StringComparison.Ordinal);
         Assert.DoesNotContain("rtsp", body, StringComparison.OrdinalIgnoreCase);
         using var cameraJson = System.Text.Json.JsonDocument.Parse(body);
+        Assert.Matches("^CAM[0-9]{12}$", cameraJson.RootElement[0].GetProperty("cameraId").GetString());
+        Assert.DoesNotContain("capture-test", body, StringComparison.Ordinal);
+        var liveUrl = cameraJson.RootElement[0].GetProperty("liveUrl").GetString()!;
         Assert.False(cameraJson.RootElement[0].TryGetProperty("segments", out _));
         Assert.False(cameraJson.RootElement[0].TryGetProperty("gaps", out _));
         Assert.False(cameraJson.RootElement[0].TryGetProperty("adapter", out _));
@@ -162,7 +164,7 @@ public sealed class AuthenticationAndLiveTests
         while (DateTime.UtcNow < deadline)
         {
             playlist?.Dispose();
-            playlist = await session.GetAsync("/api/v1/live/capture-test/index.m3u8");
+            playlist = await session.GetAsync(liveUrl);
             if (playlist.StatusCode == HttpStatusCode.OK) break;
             await Task.Delay(100);
         }
@@ -183,7 +185,7 @@ public sealed class AuthenticationAndLiveTests
             long refreshedSequence = firstSequence;
             while (DateTime.UtcNow < segmentDeadline)
             {
-                using var refreshedPlaylist = await session.GetAsync("/api/v1/live/capture-test/index.m3u8");
+                using var refreshedPlaylist = await session.GetAsync(liveUrl);
                 if (refreshedPlaylist.StatusCode == HttpStatusCode.OK)
                 {
                     var refreshedBody = await refreshedPlaylist.Content.ReadAsStringAsync();

@@ -9,12 +9,12 @@ public sealed class GetClipThumbnailEndpoint() : BaseEndpoint("Clips", "GetClipT
     "Checks current camera scope and thumbnail SHA-256 before serving JPEG content.")
 {
     protected override RouteHandlerBuilder MapCore(IEndpointRouteBuilder routes) =>
-        routes.MapGet("/api/v1/clips/{clipId}/thumbnail", async (string clipId, ClaimsPrincipal principal,
+        routes.MapGet("/api/v1/clips/{publicId}/thumbnail", async (string publicId, ClaimsPrincipal principal,
             UserManager<ApplicationUser> users, ClipLibraryService library, CancellationToken cancellationToken) =>
         {
             var user = await users.GetUserAsync(principal);
             if (user is null || !user.IsActive) return Results.Unauthorized();
-            var result = await library.GetAsync(user.Id, await users.IsInRoleAsync(user, "Administrator"), clipId,
+            var result = await library.GetAsync(user.Id, await users.IsInRoleAsync(user, "Administrator"), publicId,
                 cancellationToken);
             if (result.Details is null || result.ThumbnailPath is null ||
                 !await ClipLibraryService.HasValidHashAsync(result.ThumbnailPath, result.Details.ThumbnailSha256!, cancellationToken))

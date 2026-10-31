@@ -1,8 +1,9 @@
 namespace GarageWatch.Infrastructure.Identity;
 
-public sealed class AccessProfile
+public sealed class AccessProfile : IHasPublicId
 {
     public Guid Id { get; set; }
+    public string? PublicId { get; set; }
     public string Name { get; set; } = string.Empty;
     public bool IsActive { get; set; } = true;
     public long Version { get; set; } = 1;
@@ -11,9 +12,10 @@ public sealed class AccessProfile
     public ICollection<AccessProfileVersion> Versions { get; set; } = new List<AccessProfileVersion>();
 }
 
-public sealed class AccessProfileVersion
+public sealed class AccessProfileVersion : IHasPublicId
 {
     public Guid Id { get; set; }
+    public string? PublicId { get; set; }
     public Guid ProfileId { get; set; }
     public long Version { get; set; }
     public DateTimeOffset CreatedAtUtc { get; set; }
@@ -29,9 +31,10 @@ public sealed class AccessProfilePermission
     public AccessProfileVersion? Version { get; set; }
 }
 
-public sealed class UserAccessProfileAssignment
+public sealed class UserAccessProfileAssignment : IHasPublicId
 {
     public Guid Id { get; set; }
+    public string? PublicId { get; set; }
     public Guid UserId { get; set; }
     public Guid AccessProfileVersionId { get; set; }
     public Guid AssignedByUserId { get; set; }

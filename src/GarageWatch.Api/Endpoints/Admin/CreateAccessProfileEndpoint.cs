@@ -21,7 +21,7 @@ public sealed class CreateAccessProfileEndpoint() : BaseEndpoint("Access profile
             try
             {
                 var created = await profiles.CreateAsync(actor.Id, request.Name, request.PermissionKeys, cancellationToken);
-                return Results.Created($"/api/v1/admin/access-rules/{created.Id}", created);
+                return Results.Created($"/api/v1/admin/access-rules/{created.PublicId}", created);
             }
             catch (Exception exception) when (exception is ArgumentException or InvalidOperationException or
                                               KeyNotFoundException or UnauthorizedAccessException)

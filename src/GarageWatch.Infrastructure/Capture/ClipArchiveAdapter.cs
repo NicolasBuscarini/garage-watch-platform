@@ -1,9 +1,10 @@
 using System.Security.Cryptography;
 using System.Text.Json;
+using GarageWatch.Infrastructure.Identity;
 
 namespace GarageWatch.Infrastructure.Capture;
 
-public sealed record ArchivedClipManifestV1(string SchemaVersion, string ClipId, string CameraId,
+public sealed record ArchivedClipManifestV1(string SchemaVersion, string ClipId, string PublicId, string CameraId,
     DateTimeOffset RequestedStartedAt, DateTimeOffset RequestedEndedAt, DateTimeOffset EffectiveStartedAt,
     DateTimeOffset EffectiveEndedAt, string TriggerConfigVersion, string TriggerReason,
     IReadOnlyList<string> SegmentIds, string MediaFileName, long MediaSizeBytes, string MediaSha256,
@@ -27,6 +28,7 @@ public sealed class LocalFilesystemClipArchiveAdapter(ClipArchiveOptions options
         string thumbnailPath, CancellationToken cancellationToken)
     {
         if (!options.Enabled || clip.State != "ready" || !LocalSegmentSpool.IsSafeSegmentId(clip.ClipId)
+            || !PublicIdFormat.IsValid(clip.PublicId, PublicIdPrefixes.ClipPrefix)
             || !IsSafeCameraId(clip.CameraId) || clip.SegmentIds is not { Count: > 0 }
             || clip.SegmentIds.Any(segmentId => !LocalSegmentSpool.IsSafeSegmentId(segmentId))
             || string.IsNullOrWhiteSpace(clip.TriggerConfigVersion) || clip.TriggerConfigVersion.Length > 64
@@ -85,7 +87,7 @@ public sealed class LocalFilesystemClipArchiveAdapter(ClipArchiveOptions options
         await CopyVerifiedAsync(thumbnailPath, archivedThumbnail, clip.ThumbnailSha256!, cancellationToken);
 
         ArchivedClipManifestV1 archiveManifest;
-        archiveManifest = new ArchivedClipManifestV1("1.0", clip.ClipId, clip.CameraId,
+        archiveManifest = new ArchivedClipManifestV1("1.0", clip.ClipId, clip.PublicId ?? string.Empty, clip.CameraId,
             clip.RequestedStartedAt, clip.RequestedEndedAt, clip.EffectiveStartedAt, clip.EffectiveEndedAt,
             clip.TriggerConfigVersion, clip.TriggerReason, clip.SegmentIds, clip.MediaFileName, mediaInfo.Length,
             clip.MediaSha256!, clip.ThumbnailFileName, thumbnailInfo.Length, clip.ThumbnailSha256!, DateTimeOffset.UtcNow);
@@ -145,6 +147,7 @@ public sealed class LocalFilesystemClipArchiveAdapter(ClipArchiveOptions options
         }
         catch (JsonException) { throw new InvalidDataException("clip_archive_manifest_invalid"); }
         if (manifest is null || manifest.SchemaVersion != "1.0" || manifest.ClipId != clip.ClipId
+            || manifest.PublicId != clip.PublicId
             || manifest.CameraId != clip.CameraId || manifest.MediaSha256 != clip.MediaSha256
             || manifest.ThumbnailSha256 != clip.ThumbnailSha256 || manifest.MediaFileName != clip.MediaFileName
             || manifest.ThumbnailFileName != clip.ThumbnailFileName

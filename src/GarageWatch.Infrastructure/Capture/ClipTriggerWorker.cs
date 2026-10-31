@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Diagnostics.Metrics;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.DependencyInjection;
 using GarageWatch.Infrastructure.Identity;
 
 namespace GarageWatch.Infrastructure.Capture;
@@ -16,11 +17,13 @@ public sealed class ClipTriggerWorker : BackgroundService
     private static readonly Counter<long> Clips = Meter.CreateCounter<long>("garagewatch.clips");
     private readonly Channel<SegmentManifestV1> queue;
     private readonly List<PendingClip> pending = [];
+    private readonly IPublicIdGenerator publicIds;
     private DateTimeOffset lastTriggerAt = DateTimeOffset.MinValue;
 
     public ClipTriggerWorker(CaptureOptions capture, ClipTriggerOptions options, LocalSegmentSpool spool,
         IVisualChangeDetector detector, IClipMediaAssembler assembler, ILogger<ClipTriggerWorker> logger,
-        IClipAnalysisAutoDispatcher? analysisDispatcher = null)
+        IClipAnalysisAutoDispatcher? analysisDispatcher = null,
+        IPublicIdGenerator? publicIds = null, IServiceScopeFactory? scopeFactory = null)
     {
         Capture = capture;
         Options = options;
@@ -29,6 +32,8 @@ public sealed class ClipTriggerWorker : BackgroundService
         Assembler = assembler;
         Logger = logger;
         AnalysisDispatcher = analysisDispatcher;
+        ScopeFactory = scopeFactory;
+        this.publicIds = publicIds ?? new PublicIdGenerator();
         queue = Channel.CreateBounded<SegmentManifestV1>(new BoundedChannelOptions(options.QueueCapacity)
         {
             FullMode = BoundedChannelFullMode.DropWrite,
@@ -44,21 +49,23 @@ public sealed class ClipTriggerWorker : BackgroundService
     private IClipMediaAssembler Assembler { get; }
     private ILogger<ClipTriggerWorker> Logger { get; }
     private IClipAnalysisAutoDispatcher? AnalysisDispatcher { get; }
+    private IServiceScopeFactory? ScopeFactory { get; }
 
     public bool TryEnqueue(SegmentManifestV1 segment)
     {
-        var accepted = Options.Enabled && queue.Writer.TryWrite(segment);
+        var accepted = (ScopeFactory is not null || Options.Enabled) && queue.Writer.TryWrite(segment);
         Observations.Add(1, new TagList { { "outcome", accepted ? "accepted" : "dropped" } });
         return accepted;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        if (!Options.Enabled) return;
+        if (!Options.Enabled && ScopeFactory is null) return;
         await RecoverPendingAsync(stoppingToken);
         await foreach (var segment in queue.Reader.ReadAllAsync(stoppingToken))
         {
             await AdvancePendingAsync(segment, stoppingToken);
+            if (!await IsTriggerEnabledAsync(stoppingToken)) continue;
             var path = Spool.TryGetSegmentPath(segment);
             if (path is null || DateTimeOffset.UtcNow - lastTriggerAt < TimeSpan.FromSeconds(Options.CooldownSeconds)) continue;
             if (!await Detector.HasRelevantChangeAsync(path, stoppingToken))
@@ -71,8 +78,34 @@ public sealed class ClipTriggerWorker : BackgroundService
         }
     }
 
+    private async Task<bool> IsTriggerEnabledAsync(CancellationToken cancellationToken)
+    {
+        if (ScopeFactory is null) return Options.Enabled;
+        try
+        {
+            await using var scope = ScopeFactory.CreateAsyncScope();
+            return await scope.ServiceProvider.GetRequiredService<CameraClipTriggerConfigurationService>()
+                .IsEnabledAsync(Capture.CameraId, cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+        catch (Exception exception)
+        {
+            Logger.LogWarning("Configuração do gatilho indisponível; geração ignorada. motivo={FailureType}",
+                exception.GetType().Name);
+            return false;
+        }
+    }
+
     private async Task RecoverPendingAsync(CancellationToken cancellationToken)
     {
+        var manifests = ReadManifests();
+        var reservedIds = manifests.Where(clip => PublicIdFormat.IsValid(clip.PublicId, PublicIdPrefixes.ClipPrefix))
+            .Select(clip => clip.PublicId!).ToHashSet(StringComparer.Ordinal);
+        foreach (var missingId in manifests.Where(clip => !PublicIdFormat.IsValid(clip.PublicId, PublicIdPrefixes.ClipPrefix)))
+        {
+            var assigned = ClipPublicIdAllocator.GenerateUnique(publicIds, reservedIds);
+            await PersistAsync(missingId with { PublicId = assigned }, cancellationToken);
+        }
         foreach (var clip in ReadManifests().Where(clip => clip.State == "collecting"))
         {
             var known = Spool.GetRecentSegments(10_000)
@@ -101,9 +134,13 @@ public sealed class ClipTriggerWorker : BackgroundService
             .Where(item => item.Manifest.EndedAt >= preStart).Select(item => item.Manifest).ToArray();
         if (selected.Length == 0) return;
         var id = Guid.NewGuid().ToString("N");
+        var publicId = ClipPublicIdAllocator.GenerateUnique(publicIds,
+            ReadManifests().Select(clip => clip.PublicId).Where(value => value is not null)
+                .Cast<string>().ToHashSet(StringComparer.Ordinal));
         var clip = new ClipManifestV1("1.0", id, Capture.CameraId, preStart,
             segment.EndedAt + TimeSpan.FromSeconds(Options.PostEventSeconds), selected.First().StartedAt, segment.EndedAt,
-            "collecting", "trigger-v1", triggerReason, selected.Select(item => item.SegmentId).ToArray(), null, null, null, null, 0, now);
+            "collecting", "trigger-v1", triggerReason, selected.Select(item => item.SegmentId).ToArray(), null, null, null, null, 0, now,
+            PublicId: publicId);
         var item = new PendingClip(clip, clip.RequestedEndedAt);
         pending.Add(item);
         lastTriggerAt = now;

@@ -6,12 +6,12 @@ using Microsoft.EntityFrameworkCore;
 
 namespace GarageWatch.Infrastructure.Capture;
 
-public sealed record ClipListItem(string ClipId, string CameraId, DateTimeOffset StartedAtUtc,
+public sealed record ClipListItem(string PublicId, string CameraId, DateTimeOffset StartedAtUtc,
     DateTimeOffset EndedAtUtc, string State, string ArchiveStatus, string AnalysisStatus, string? ThumbnailUrl,
     long? SizeBytes, string? TriggerReason, string? TriggerConfigVersion);
 public sealed record ClipPage(IReadOnlyList<ClipListItem> Items, int Page, int PageSize, int Total);
 public sealed record ClipDetails(ClipListItem Clip, string? MediaUrl, string? MediaSha256,
-    string? ThumbnailSha256, IReadOnlyList<string> SegmentIds, int AttemptCount,
+    string? ThumbnailSha256, int AttemptCount,
     DateTimeOffset UpdatedAtUtc);
 
 public sealed class ClipLibraryService(CaptureOptions capture, IamDbContext database, AccessProfileService profiles)
@@ -24,19 +24,21 @@ public sealed class ClipLibraryService(CaptureOptions capture, IamDbContext data
     {
         if (page is < 1 or > 100_000 || pageSize is < 1 or > 100 ||
             (fromUtc.HasValue && toUtc.HasValue && fromUtc > toUtc) ||
+            (cameraId is not null && !PublicIdFormat.IsValid(cameraId, PublicIdPrefixes.CameraPrefix)) ||
             (state is not null && state is not ("collecting" or "ready" or "failed" or "lost_capacity")))
             throw new ArgumentException("invalid_clip_query");
 
         var allowedCameras = await database.CameraCatalog.AsNoTracking()
             .Where(camera => camera.IsEnabled && camera.Context.IsEnabled &&
-                (cameraId == null || camera.CameraId == cameraId))
-            .Select(camera => new { camera.CameraId, camera.ContextId }).ToArrayAsync(cancellationToken);
+                (cameraId == null || camera.PublicId == cameraId))
+            .Select(camera => new { camera.CameraId, camera.PublicId, camera.ContextId }).ToArrayAsync(cancellationToken);
         var accessible = new HashSet<string>(StringComparer.Ordinal);
         foreach (var camera in allowedCameras)
             if (isAdministrator || await profiles.IsAllowedAsync(userId,
                     new PermissionRequest("clips.read", camera.ContextId, camera.CameraId), cancellationToken))
                 accessible.Add(camera.CameraId);
-        if (cameraId is not null && !accessible.Contains(cameraId)) return new([], page, pageSize, 0);
+        if (cameraId is not null && !allowedCameras.Any(camera => camera.PublicId == cameraId && accessible.Contains(camera.CameraId)))
+            return new([], page, pageSize, 0);
 
         var directory = ManifestDirectory;
         if (!Directory.Exists(directory)) return new([], page, pageSize, 0);
@@ -69,31 +71,33 @@ public sealed class ClipLibraryService(CaptureOptions capture, IamDbContext data
         }
         var ordered = clips.OrderByDescending(clip => clip.EffectiveStartedAt).ThenBy(clip => clip.ClipId,
             StringComparer.Ordinal).ToArray();
+        var cameraPublicIds = allowedCameras.ToDictionary(camera => camera.CameraId, camera => camera.PublicId!,
+            StringComparer.Ordinal);
         var items = ordered.Skip((page - 1) * pageSize).Take(pageSize).Select(clip => Map(clip,
-            latestJobs.GetValueOrDefault(clip.ClipId)?.State ?? "not_requested")).ToArray();
+            latestJobs.GetValueOrDefault(clip.ClipId)?.State ?? "not_requested", cameraPublicIds[clip.CameraId])).ToArray();
         return new(items, page, pageSize, ordered.Length);
     }
 
     public async Task<(ClipDetails? Details, string? MediaPath, string? ThumbnailPath)> GetAsync(Guid userId,
-        bool isAdministrator, string clipId, CancellationToken cancellationToken)
+        bool isAdministrator, string publicId, CancellationToken cancellationToken)
     {
-        if (!LocalSegmentSpool.IsSafeSegmentId(clipId)) return (null, null, null);
-        var clip = await ReadManifestAsync(Path.Combine(ManifestDirectory, clipId + ".json"), cancellationToken);
+        if (!PublicIdFormat.IsValid(publicId, PublicIdPrefixes.ClipPrefix)) return (null, null, null);
+        var clip = await FindManifestByPublicIdAsync(publicId, cancellationToken);
         if (clip is null) return (null, null, null);
         var camera = await database.CameraCatalog.AsNoTracking().Where(item => item.CameraId == clip.CameraId &&
-            item.IsEnabled && item.Context.IsEnabled).Select(item => new { item.CameraId, item.ContextId })
+            item.IsEnabled && item.Context.IsEnabled).Select(item => new { item.CameraId, item.PublicId, item.ContextId })
             .SingleOrDefaultAsync(cancellationToken);
         if (camera is null || (!isAdministrator && !await profiles.IsAllowedAsync(userId,
                 new PermissionRequest("clips.read", camera.ContextId, camera.CameraId), cancellationToken)))
             return (null, null, null);
 
-        var job = await database.ClipAnalysisJobs.AsNoTracking().Where(item => item.ClipId == clipId)
+        var job = await database.ClipAnalysisJobs.AsNoTracking().Where(item => item.ClipId == clip.ClipId)
             .OrderByDescending(item => item.CreatedAtUtc).FirstOrDefaultAsync(cancellationToken);
-        var item = Map(clip, job?.State ?? "not_requested");
+        var item = Map(clip, job?.State ?? "not_requested", camera.PublicId!);
         var mediaPath = ResolveMedia(clip);
         var thumbnailPath = ResolveThumbnail(clip);
-        return (new(item, mediaPath is null ? null : $"/api/v1/clips/{clipId}/media",
-            clip.MediaSha256, clip.ThumbnailSha256, clip.SegmentIds, clip.AttemptCount, clip.UpdatedAt),
+        return (new(item, mediaPath is null ? null : $"/api/v1/clips/{publicId}/media",
+            clip.MediaSha256, clip.ThumbnailSha256, clip.AttemptCount, clip.UpdatedAt),
             mediaPath, thumbnailPath);
     }
 
@@ -113,6 +117,7 @@ public sealed class ClipLibraryService(CaptureOptions capture, IamDbContext data
             await using var stream = File.OpenRead(path);
             var clip = await JsonSerializer.DeserializeAsync<ClipManifestV1>(stream, JsonOptions, cancellationToken);
             if (clip is not { SchemaVersion: "1.0" } || !LocalSegmentSpool.IsSafeSegmentId(clip.ClipId) ||
+                !PublicIdFormat.IsValid(clip.PublicId, PublicIdPrefixes.ClipPrefix) ||
                 Path.GetFileName(path) != clip.ClipId + ".json" ||
                 clip.State is not ("collecting" or "ready" or "failed" or "lost_capacity")) return null;
             return clip;
@@ -121,14 +126,25 @@ public sealed class ClipLibraryService(CaptureOptions capture, IamDbContext data
         catch (JsonException) { return null; }
     }
 
-    private ClipListItem Map(ClipManifestV1 clip, string analysisStatus)
+    private ClipListItem Map(ClipManifestV1 clip, string analysisStatus, string cameraPublicId)
     {
         var media = ResolveMedia(clip);
         var thumbnail = ResolveThumbnail(clip);
         long? size = media is null ? null : new FileInfo(media).Length;
-        return new(clip.ClipId, clip.CameraId, clip.EffectiveStartedAt, clip.EffectiveEndedAt, clip.State,
-            clip.ArchiveStatus, analysisStatus, thumbnail is null ? null : $"/api/v1/clips/{clip.ClipId}/thumbnail",
+        return new(clip.PublicId!, cameraPublicId, clip.EffectiveStartedAt, clip.EffectiveEndedAt, clip.State,
+            clip.ArchiveStatus, analysisStatus, thumbnail is null ? null : $"/api/v1/clips/{clip.PublicId}/thumbnail",
             size, clip.TriggerReason, clip.TriggerConfigVersion);
+    }
+
+    private async Task<ClipManifestV1?> FindManifestByPublicIdAsync(string publicId, CancellationToken cancellationToken)
+    {
+        if (!Directory.Exists(ManifestDirectory)) return null;
+        foreach (var path in Directory.EnumerateFiles(ManifestDirectory, "*.json").Take(10_000))
+        {
+            var manifest = await ReadManifestAsync(path, cancellationToken);
+            if (manifest?.PublicId == publicId) return manifest;
+        }
+        return null;
     }
 
     private string? ResolveMedia(ClipManifestV1 clip) => Resolve("media", clip.MediaFileName, clip.MediaSha256);

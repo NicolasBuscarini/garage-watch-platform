@@ -23,6 +23,7 @@ public static class DependencyInjection
     public static IServiceCollection AddPlatformInfrastructure(this IServiceCollection services, IConfiguration configuration)
     {
         services.AddSingleton<ISystemProfileSource, EnvironmentSystemProfileSource>();
+        services.AddSingleton<IPublicIdGenerator, PublicIdGenerator>();
         services.AddDbContext<IamDbContext>((provider, options) =>
         {
             var settings = provider.GetRequiredService<IConfiguration>();
@@ -59,6 +60,7 @@ public static class DependencyInjection
         services.AddScoped<AccessProfileService>();
         services.AddScoped<AccessRequestService>();
         services.AddScoped<ClipAnalysisDispatchService>();
+        services.AddScoped<CameraClipTriggerConfigurationService>();
         services.AddScoped<ICameraCatalog, CameraCatalogService>();
         services.AddScoped<ICameraResourceAccess, CameraResourceAccessService>();
         services.AddSingleton<IPermissionEvaluator, PermissionEvaluator>();

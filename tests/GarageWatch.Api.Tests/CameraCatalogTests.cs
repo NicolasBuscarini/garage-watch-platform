@@ -18,6 +18,8 @@ public sealed class CameraCatalogTests
     public async Task Bootstrap_seeds_the_configured_camera_and_keeps_catalog_state_persistent()
     {
         var path = Path.Combine(Path.GetTempPath(), "garagewatch-tests", $"{Guid.NewGuid():N}.db");
+        string contextPublicId;
+        string cameraPublicId;
         await using (var factory = new ApiFactory(databasePath: path))
         {
             using var scope = factory.Services.CreateScope();
@@ -26,11 +28,13 @@ public sealed class CameraCatalogTests
             var cameras = await catalog.ListCamerasAsync(1, 20);
 
             var context = Assert.Single(contexts.Items);
-            Assert.Equal("garage", context.ContextId);
+            Assert.StartsWith("CTX", context.ContextId);
+            contextPublicId = context.ContextId;
             Assert.True(context.IsEnabled);
             var camera = Assert.Single(cameras.Items);
-            Assert.Equal(scope.ServiceProvider.GetRequiredService<CaptureOptions>().CameraId, camera.CameraId);
-            Assert.Equal("garage", camera.ContextId);
+            Assert.StartsWith("CAM", camera.CameraId);
+            cameraPublicId = camera.CameraId;
+            Assert.Equal(context.ContextId, camera.ContextId);
             Assert.True(camera.IsEnabled);
         }
 
@@ -38,7 +42,10 @@ public sealed class CameraCatalogTests
         using (var scope = restarted.Services.CreateScope())
         {
             var catalog = scope.ServiceProvider.GetRequiredService<ICameraCatalog>();
-            Assert.Single((await catalog.ListCamerasAsync(1, 20)).Items);
+            var camera = Assert.Single((await catalog.ListCamerasAsync(1, 20)).Items);
+            var context = Assert.Single((await catalog.ListContextsAsync(1, 20)).Items);
+            Assert.Equal(cameraPublicId, camera.CameraId);
+            Assert.Equal(contextPublicId, context.ContextId);
         }
     }
 
@@ -52,8 +59,8 @@ public sealed class CameraCatalogTests
         var catalog = scope.ServiceProvider.GetRequiredService<ICameraCatalog>();
         var database = scope.ServiceProvider.GetRequiredService<IamDbContext>();
 
-        var context = await catalog.CreateContextAsync(administrator.Id, "shed", "Oficina");
-        var camera = await catalog.CreateCameraAsync(administrator.Id, "shed-cam-01", context.ContextId, "Porta lateral");
+        var context = await catalog.CreateContextAsync(administrator.Id, "Oficina");
+        var camera = await catalog.CreateCameraAsync(administrator.Id, context.ContextId, "Porta lateral");
         Assert.Equal(1, camera.Version);
 
         var renamed = await catalog.UpdateCameraAsync(administrator.Id, camera.CameraId, camera.Version,
@@ -88,6 +95,8 @@ public sealed class CameraCatalogTests
         adminClient.DefaultRequestHeaders.Add("Cookie", Assert.Single(login.Headers.GetValues("Set-Cookie")).Split(';', 2)[0]);
 
         Guid viewerId;
+        string internalCameraId;
+        string internalContextId;
         using (var scope = factory.Services.CreateScope())
         {
             var users = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
@@ -96,9 +105,13 @@ public sealed class CameraCatalogTests
             Assert.True((await users.AddToRoleAsync(viewer, "Viewer")).Succeeded);
             viewerId = viewer.Id;
             var admin = (await users.FindByNameAsync("contract-user"))!;
-            var cameraId = scope.ServiceProvider.GetRequiredService<CaptureOptions>().CameraId;
+            internalCameraId = scope.ServiceProvider.GetRequiredService<CaptureOptions>().CameraId;
+            internalContextId = "garage";
             var catalog = scope.ServiceProvider.GetRequiredService<ICameraCatalog>();
-            await catalog.CreateCameraAsync(admin.Id, "ungranted-camera", "garage", "Sem concessão");
+            var database = scope.ServiceProvider.GetRequiredService<IamDbContext>();
+            var garageContextPublicId = await database.CameraContexts.Where(item => item.ContextId == "garage")
+                .Select(item => item.PublicId).SingleAsync();
+            await catalog.CreateCameraAsync(admin.Id, garageContextPublicId!, "Sem concessão");
         }
         Guid adminIdForGrant;
         using (var adminScope = factory.Services.CreateScope())
@@ -111,6 +124,10 @@ public sealed class CameraCatalogTests
         Assert.Equal(HttpStatusCode.OK, adminResponse.StatusCode);
         using var adminJson = JsonDocument.Parse(await adminResponse.Content.ReadAsStringAsync());
         Assert.Equal(2, adminJson.RootElement.GetArrayLength());
+        Assert.DoesNotContain(adminJson.RootElement.EnumerateArray(), item =>
+            item.GetProperty("cameraId").GetString() == internalCameraId);
+        Assert.Equal(HttpStatusCode.BadRequest,
+            (await adminClient.GetAsync($"/api/v1/admin/cameras?contextId={internalContextId}")).StatusCode);
 
         using var scope2 = factory.Services.CreateScope();
         var viewerUser = await scope2.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>()
@@ -125,7 +142,7 @@ public sealed class CameraCatalogTests
         Assert.Equal(1, await catalogDb.UserAccessProfileScopes.CountAsync(item => item.CameraId == storedGrant.CameraId && item.ContextId == "garage"));
         var visible = await scope2.ServiceProvider.GetRequiredService<ICameraCatalog>()
             .ListVisibleCamerasAsync(viewerUser!.Id, false);
-        Assert.Equal(storedGrant.CameraId, Assert.Single(visible).CameraId);
+        Assert.StartsWith("CAM", Assert.Single(visible).CameraId);
 
         using var apiViewer = factory.CreateClient();
         using var viewerLogin = await apiViewer.PostAsJsonAsync("/api/v1/auth/login",
@@ -134,6 +151,6 @@ public sealed class CameraCatalogTests
         apiViewer.DefaultRequestHeaders.Add("Cookie", Assert.Single(viewerLogin.Headers.GetValues("Set-Cookie")).Split(';', 2)[0]);
         using var viewerResponse = await apiViewer.GetAsync("/api/v1/cameras");
         using var viewerJson = JsonDocument.Parse(await viewerResponse.Content.ReadAsStringAsync());
-        Assert.Equal(storedGrant.CameraId, viewerJson.RootElement[0].GetProperty("cameraId").GetString());
+        Assert.Equal(Assert.Single(visible).CameraId, viewerJson.RootElement[0].GetProperty("cameraId").GetString());
     }
 }

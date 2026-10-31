@@ -11,6 +11,7 @@ public sealed class CameraCatalogService(
     IIamAuditEventRepository auditEvents,
     UserManager<ApplicationUser> users,
     AccessProfileService accessProfiles,
+    IPublicIdGenerator publicIds,
     TimeProvider timeProvider) : ICameraCatalog
 {
     public async Task<CatalogPage<CameraContextRecord>> ListContextsAsync(int page, int pageSize,
@@ -20,7 +21,7 @@ public sealed class CameraCatalogService(
         var query = database.CameraContexts.AsNoTracking().OrderBy(item => item.ContextId);
         var total = await query.CountAsync(cancellationToken);
         var items = await query.Skip((page - 1) * pageSize).Take(pageSize)
-            .Select(item => new CameraContextRecord(item.ContextId, item.Name, item.IsEnabled, item.Version,
+            .Select(item => new CameraContextRecord(item.PublicId!, item.Name, item.IsEnabled, item.Version,
                 item.CreatedAtUtc, item.UpdatedAtUtc))
             .ToArrayAsync(cancellationToken);
         return new(items, page, pageSize, total);
@@ -31,11 +32,11 @@ public sealed class CameraCatalogService(
     {
         ValidatePage(page, pageSize);
         var query = database.CameraCatalog.AsNoTracking();
-        if (contextId is not null) query = query.Where(item => item.ContextId == contextId);
+        if (contextId is not null) query = query.Where(item => item.Context.PublicId == contextId);
         var ordered = query.OrderBy(item => item.CameraId);
         var total = await ordered.CountAsync(cancellationToken);
         var items = await ordered.Skip((page - 1) * pageSize).Take(pageSize)
-            .Select(item => new CameraCatalogRecord(item.CameraId, item.ContextId, item.Name, item.IsEnabled,
+            .Select(item => new CameraCatalogRecord(item.PublicId!, item.Context.PublicId!, item.Name, item.IsEnabled,
                 item.Version, item.CreatedAtUtc, item.UpdatedAtUtc))
             .ToArrayAsync(cancellationToken);
         return new(items, page, pageSize, total);
@@ -48,7 +49,7 @@ public sealed class CameraCatalogService(
         if (isAdministrator)
         {
             return await cameras.OrderBy(item => item.CameraId)
-                .Select(item => new CameraCatalogRecord(item.CameraId, item.ContextId, item.Name, item.IsEnabled,
+                .Select(item => new CameraCatalogRecord(item.PublicId!, item.Context.PublicId!, item.Name, item.IsEnabled,
                     item.Version, item.CreatedAtUtc, item.UpdatedAtUtc))
                 .ToArrayAsync(cancellationToken);
         }
@@ -57,8 +58,18 @@ public sealed class CameraCatalogService(
             .Where(camera => camera.IsEnabled && database.CameraContexts.Any(context =>
                 context.ContextId == camera.ContextId && context.IsEnabled))
             .OrderBy(camera => camera.CameraId)
-            .Select(camera => new CameraCatalogRecord(camera.CameraId, camera.ContextId, camera.Name, camera.IsEnabled,
-                camera.Version, camera.CreatedAtUtc, camera.UpdatedAtUtc))
+            .Select(camera => new
+            {
+                camera.CameraId,
+                camera.ContextId,
+                camera.PublicId,
+                ContextPublicId = camera.Context.PublicId,
+                camera.Name,
+                camera.IsEnabled,
+                camera.Version,
+                camera.CreatedAtUtc,
+                camera.UpdatedAtUtc
+            })
             .ToArrayAsync(cancellationToken);
         var visible = new List<CameraCatalogRecord>();
         foreach (var camera in enabled)
@@ -70,24 +81,24 @@ public sealed class CameraCatalogService(
                 new GarageWatch.Application.Authorization.PermissionRequest("live.video.view", camera.ContextId,
                     camera.CameraId), cancellationToken);
             if (canList || canViewLive)
-                visible.Add(camera);
+                visible.Add(new CameraCatalogRecord(camera.PublicId!, camera.ContextPublicId!, camera.Name,
+                    camera.IsEnabled, camera.Version, camera.CreatedAtUtc, camera.UpdatedAtUtc));
         }
         return visible;
     }
 
-    public Task<CameraContextRecord> CreateContextAsync(Guid actorUserId, string contextId, string name,
+    public Task<CameraContextRecord> CreateContextAsync(Guid actorUserId, string name,
         CancellationToken cancellationToken = default) => unitOfWork.ExecuteAtomicallyAsync(async token =>
     {
         await EnsureAdministratorAsync(actorUserId);
-        ValidateIdentifier(contextId, nameof(contextId));
         var normalizedName = ValidateName(name, nameof(name));
-        if (await database.CameraContexts.AnyAsync(item => item.ContextId == contextId, token))
-            throw new CatalogConflictException("O contexto já existe.");
+        var contextId = Guid.NewGuid().ToString("N");
 
         var now = timeProvider.GetUtcNow();
         var context = new CameraContext
         {
             ContextId = contextId,
+            PublicId = publicIds.Generate(PublicIdPrefixes.ContextPrefix),
             Name = normalizedName,
             IsEnabled = true,
             Version = 1,
@@ -104,13 +115,14 @@ public sealed class CameraCatalogService(
         unitOfWork.ExecuteAtomicallyAsync(async token =>
         {
             await EnsureAdministratorAsync(actorUserId);
-            ValidateIdentifier(contextId, nameof(contextId));
+            if (!PublicIdFormat.IsValid(contextId, PublicIdPrefixes.ContextPrefix))
+                throw new CatalogNotFoundException("Contexto não encontrado.");
             ValidateVersion(expectedVersion);
-            var context = await database.CameraContexts.SingleOrDefaultAsync(item => item.ContextId == contextId, token)
+            var context = await database.CameraContexts.SingleOrDefaultAsync(item => item.PublicId == contextId, token)
                 ?? throw new CatalogNotFoundException("Contexto não encontrado.");
             EnsureVersion(context.Version, expectedVersion);
             if (!isEnabled && await database.CameraCatalog.AnyAsync(
-                    item => item.ContextId == contextId && item.IsEnabled, token))
+                     item => item.ContextId == context.ContextId && item.IsEnabled, token))
                 throw new CatalogConflictException("Desative as câmeras do contexto antes de desativá-lo.");
 
             var normalizedName = ValidateName(name, nameof(name));
@@ -119,7 +131,7 @@ public sealed class CameraCatalogService(
             context.IsEnabled = isEnabled;
             context.Version++;
             context.UpdatedAtUtc = timeProvider.GetUtcNow();
-            Record(actorUserId, "camera_context.updated", contextId);
+            Record(actorUserId, "camera_context.updated", context.ContextId);
             return Map(context);
         }, cancellationToken);
 
@@ -127,41 +139,43 @@ public sealed class CameraCatalogService(
         CancellationToken cancellationToken = default) => unitOfWork.ExecuteAtomicallyAsync(async token =>
     {
         await EnsureAdministratorAsync(actorUserId);
-        ValidateIdentifier(contextId, nameof(contextId));
+        if (!PublicIdFormat.IsValid(contextId, PublicIdPrefixes.ContextPrefix))
+            throw new CatalogNotFoundException("Contexto não encontrado.");
         ValidateVersion(expectedVersion);
-        var context = await database.CameraContexts.SingleOrDefaultAsync(item => item.ContextId == contextId, token)
+        var context = await database.CameraContexts.SingleOrDefaultAsync(item => item.PublicId == contextId, token)
             ?? throw new CatalogNotFoundException("Contexto não encontrado.");
         EnsureVersion(context.Version, expectedVersion);
-        if (await database.CameraCatalog.AnyAsync(item => item.ContextId == contextId && item.IsEnabled, token))
+        if (await database.CameraCatalog.AnyAsync(item => item.ContextId == context.ContextId && item.IsEnabled, token))
             throw new CatalogConflictException("Desative as câmeras do contexto antes de desativá-lo.");
         if (context.IsEnabled)
         {
             context.IsEnabled = false;
             context.Version++;
             context.UpdatedAtUtc = timeProvider.GetUtcNow();
-            Record(actorUserId, "camera_context.deactivated", contextId);
+            Record(actorUserId, "camera_context.deactivated", context.ContextId);
         }
         return Map(context);
     }, cancellationToken);
 
-    public Task<CameraCatalogRecord> CreateCameraAsync(Guid actorUserId, string cameraId, string contextId,
+    public Task<CameraCatalogRecord> CreateCameraAsync(Guid actorUserId, string contextId,
         string name, CancellationToken cancellationToken = default) => unitOfWork.ExecuteAtomicallyAsync(async token =>
     {
         await EnsureAdministratorAsync(actorUserId);
-        ValidateIdentifier(cameraId, nameof(cameraId));
-        ValidateIdentifier(contextId, nameof(contextId));
+        if (!PublicIdFormat.IsValid(contextId, PublicIdPrefixes.ContextPrefix))
+            throw new CatalogNotFoundException("Contexto não encontrado.");
         var normalizedName = ValidateName(name, nameof(name));
-        var context = await database.CameraContexts.SingleOrDefaultAsync(item => item.ContextId == contextId, token)
+        var context = await database.CameraContexts.SingleOrDefaultAsync(item => item.PublicId == contextId, token)
             ?? throw new CatalogNotFoundException("Contexto não encontrado.");
         if (!context.IsEnabled) throw new CatalogConflictException("O contexto está desativado.");
-        if (await database.CameraCatalog.AnyAsync(item => item.CameraId == cameraId, token))
-            throw new CatalogConflictException("A câmera já existe.");
+        var cameraId = Guid.NewGuid().ToString("N");
 
         var now = timeProvider.GetUtcNow();
         var camera = new CameraCatalogEntry
         {
             CameraId = cameraId,
-            ContextId = contextId,
+            PublicId = publicIds.Generate(PublicIdPrefixes.CameraPrefix),
+            ContextId = context.ContextId,
+            Context = context,
             Name = normalizedName,
             IsEnabled = true,
             Version = 1,
@@ -178,20 +192,23 @@ public sealed class CameraCatalogService(
         unitOfWork.ExecuteAtomicallyAsync(async token =>
         {
             await EnsureAdministratorAsync(actorUserId);
-            ValidateIdentifier(cameraId, nameof(cameraId));
-            ValidateIdentifier(contextId, nameof(contextId));
+            if (!PublicIdFormat.IsValid(cameraId, PublicIdPrefixes.CameraPrefix) ||
+                !PublicIdFormat.IsValid(contextId, PublicIdPrefixes.ContextPrefix))
+                throw new CatalogNotFoundException("Câmera ou contexto não encontrado.");
             ValidateVersion(expectedVersion);
-            var camera = await database.CameraCatalog.SingleOrDefaultAsync(item => item.CameraId == cameraId, token)
+            var camera = await database.CameraCatalog.Include(item => item.Context)
+                .SingleOrDefaultAsync(item => item.PublicId == cameraId, token)
                 ?? throw new CatalogNotFoundException("Câmera não encontrada.");
             EnsureVersion(camera.Version, expectedVersion);
-            var context = await database.CameraContexts.SingleOrDefaultAsync(item => item.ContextId == contextId, token)
+            var context = await database.CameraContexts.SingleOrDefaultAsync(item => item.PublicId == contextId, token)
                 ?? throw new CatalogNotFoundException("Contexto não encontrado.");
             if (isEnabled && !context.IsEnabled) throw new CatalogConflictException("O contexto está desativado.");
 
             var normalizedName = ValidateName(name, nameof(name));
-            if (camera.ContextId == contextId && camera.Name == normalizedName && camera.IsEnabled == isEnabled)
+            if (camera.ContextId == context.ContextId && camera.Name == normalizedName && camera.IsEnabled == isEnabled)
                 return Map(camera);
-            camera.ContextId = contextId;
+            camera.ContextId = context.ContextId;
+            camera.Context = context;
             camera.Name = normalizedName;
             camera.IsEnabled = isEnabled;
             camera.Version++;
@@ -204,9 +221,11 @@ public sealed class CameraCatalogService(
         CancellationToken cancellationToken = default) => unitOfWork.ExecuteAtomicallyAsync(async token =>
     {
         await EnsureAdministratorAsync(actorUserId);
-        ValidateIdentifier(cameraId, nameof(cameraId));
+        if (!PublicIdFormat.IsValid(cameraId, PublicIdPrefixes.CameraPrefix))
+            throw new CatalogNotFoundException("Câmera não encontrada.");
         ValidateVersion(expectedVersion);
-        var camera = await database.CameraCatalog.SingleOrDefaultAsync(item => item.CameraId == cameraId, token)
+        var camera = await database.CameraCatalog.Include(item => item.Context)
+            .SingleOrDefaultAsync(item => item.PublicId == cameraId, token)
             ?? throw new CatalogNotFoundException("Câmera não encontrada.");
         EnsureVersion(camera.Version, expectedVersion);
         if (camera.IsEnabled)
@@ -260,9 +279,9 @@ public sealed class CameraCatalogService(
     }
 
     private static CameraContextRecord Map(CameraContext context) =>
-        new(context.ContextId, context.Name, context.IsEnabled, context.Version, context.CreatedAtUtc, context.UpdatedAtUtc);
+        new(context.PublicId!, context.Name, context.IsEnabled, context.Version, context.CreatedAtUtc, context.UpdatedAtUtc);
 
     private static CameraCatalogRecord Map(CameraCatalogEntry camera) =>
-        new(camera.CameraId, camera.ContextId, camera.Name, camera.IsEnabled, camera.Version,
+        new(camera.PublicId!, camera.Context.PublicId!, camera.Name, camera.IsEnabled, camera.Version,
             camera.CreatedAtUtc, camera.UpdatedAtUtc);
 }

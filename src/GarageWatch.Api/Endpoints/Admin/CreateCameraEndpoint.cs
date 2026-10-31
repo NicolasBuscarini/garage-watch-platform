@@ -20,7 +20,7 @@ public sealed class CreateCameraEndpoint() : BaseEndpoint("Camera administration
             if (actor is null) return Results.Unauthorized();
             try
             {
-                var created = await catalog.CreateCameraAsync(actor.Id, request.CameraId, request.ContextId,
+                var created = await catalog.CreateCameraAsync(actor.Id, request.ContextId,
                     request.Name, cancellationToken);
                 return Results.Created($"/api/v1/admin/cameras/{created.CameraId}", created);
             }

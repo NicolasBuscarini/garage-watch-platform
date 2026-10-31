@@ -30,7 +30,7 @@ public interface ICameraCatalog
     Task<IReadOnlyList<CameraCatalogRecord>> ListVisibleCamerasAsync(Guid userId, bool isAdministrator,
         CancellationToken cancellationToken = default);
 
-    Task<CameraContextRecord> CreateContextAsync(Guid actorUserId, string contextId, string name,
+    Task<CameraContextRecord> CreateContextAsync(Guid actorUserId, string name,
         CancellationToken cancellationToken = default);
 
     Task<CameraContextRecord> UpdateContextAsync(Guid actorUserId, string contextId, long expectedVersion,
@@ -39,7 +39,7 @@ public interface ICameraCatalog
     Task<CameraContextRecord> DeactivateContextAsync(Guid actorUserId, string contextId, long expectedVersion,
         CancellationToken cancellationToken = default);
 
-    Task<CameraCatalogRecord> CreateCameraAsync(Guid actorUserId, string cameraId, string contextId, string name,
+    Task<CameraCatalogRecord> CreateCameraAsync(Guid actorUserId, string contextId, string name,
         CancellationToken cancellationToken = default);
 
     Task<CameraCatalogRecord> UpdateCameraAsync(Guid actorUserId, string cameraId, long expectedVersion,

@@ -4,6 +4,7 @@ using GarageWatch.Application.Cameras;
 using GarageWatch.Infrastructure.Capture;
 using GarageWatch.Infrastructure.Identity;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.EntityFrameworkCore;
 using System.Text;
 using System.Security.Claims;
 
@@ -14,13 +15,15 @@ public sealed class GetPlaylistEndpoint() : BaseEndpoint("Live video", "GetLiveP
 {
     protected override RouteHandlerBuilder MapCore(IEndpointRouteBuilder routes) =>
         routes.MapGet("/api/v1/live/{cameraId}/index.m3u8", async (string cameraId, ClaimsPrincipal principal,
-            UserManager<ApplicationUser> users, ICameraResourceAccess cameraAccess, CaptureOptions captureOptions,
+            UserManager<ApplicationUser> users, IamDbContext database, ICameraResourceAccess cameraAccess, CaptureOptions captureOptions,
             LocalSegmentSpool spool, LivePlaylistSequence playlistSequence, CancellationToken cancellationToken) =>
         {
             var user = await users.GetUserAsync(principal);
             if (user is null || !user.IsActive) return Results.Unauthorized();
             if (!await cameraAccess.CanReadLiveAsync(user.Id, cameraId, cancellationToken)) return Results.NotFound();
-            if (!string.Equals(cameraId, captureOptions.CameraId, StringComparison.Ordinal)) return Results.NotFound();
+            var internalCameraId = await database.CameraCatalog.AsNoTracking().Where(item => item.PublicId == cameraId)
+                .Select(item => item.CameraId).SingleOrDefaultAsync(cancellationToken);
+            if (!string.Equals(internalCameraId, captureOptions.CameraId, StringComparison.Ordinal)) return Results.NotFound();
             var segments = spool.GetRecentSegments(6);
             if (segments.Count == 0) return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
             var target = Math.Max(1, (int)Math.Ceiling(segments.Max(x =>

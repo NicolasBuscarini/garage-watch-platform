@@ -29,7 +29,8 @@ public sealed class AccessRequestsApiTests
         });
         Assert.Equal(HttpStatusCode.Accepted, create.StatusCode);
         var created = await create.Content.ReadFromJsonAsync<JsonElement>();
-        var requestId = created.GetProperty("id").GetGuid();
+        var requestId = created.GetProperty("publicId").GetString()!;
+        Assert.False(created.TryGetProperty("id", out _));
         Assert.Equal("pending", created.GetProperty("status").GetString());
 
         using var duplicate = await user.PostAsJsonAsync("/api/v1/access-requests", new
@@ -39,7 +40,7 @@ public sealed class AccessRequestsApiTests
         });
         Assert.Equal(HttpStatusCode.Accepted, duplicate.StatusCode);
         var samePending = await duplicate.Content.ReadFromJsonAsync<JsonElement>();
-        Assert.Equal(requestId, samePending.GetProperty("id").GetGuid());
+        Assert.Equal(requestId, samePending.GetProperty("publicId").GetString());
 
         using var conflictingKey = await user.PostAsJsonAsync("/api/v1/access-requests", new
         {
@@ -50,7 +51,7 @@ public sealed class AccessRequestsApiTests
 
         using var mine = await user.GetAsync("/api/v1/access-requests/mine");
         var ownRequest = await mine.Content.ReadFromJsonAsync<JsonElement>();
-        Assert.Equal(requestId, ownRequest.GetProperty("request").GetProperty("id").GetGuid());
+        Assert.Equal(requestId, ownRequest.GetProperty("request").GetProperty("publicId").GetString());
 
         using var admin = await LoginAsync(factory, "contract-user", "Contract-Password-123!");
         admin.DefaultRequestHeaders.Add("Origin", "http://localhost");
@@ -58,10 +59,19 @@ public sealed class AccessRequestsApiTests
         list.EnsureSuccessStatusCode();
         var listing = await list.Content.ReadFromJsonAsync<JsonElement>();
         var item = Assert.Single(listing.GetProperty("items").EnumerateArray());
-        Assert.Equal(requestId, item.GetProperty("id").GetGuid());
+        Assert.Equal(requestId, item.GetProperty("publicId").GetString());
         Assert.Equal("request-user", item.GetProperty("username").GetString());
+        Assert.StartsWith("USR", item.GetProperty("userPublicId").GetString());
         Assert.Equal("pending", item.GetProperty("status").GetString());
         Assert.False(item.TryGetProperty("email", out _));
+        Assert.False(item.TryGetProperty("id", out _));
+        Assert.False(item.TryGetProperty("userId", out _));
+        Guid internalRequestId;
+        using (var idScope = factory.Services.CreateScope())
+            internalRequestId = await idScope.ServiceProvider.GetRequiredService<IamDbContext>().AccessRequests
+                .Where(value => value.PublicId == requestId).Select(value => value.Id).SingleAsync();
+        Assert.Equal(HttpStatusCode.NotFound,
+            (await admin.PostAsync($"/api/v1/admin/access-requests/{internalRequestId:D}/review", null)).StatusCode);
 
         using var reviewed = await admin.PostAsync($"/api/v1/admin/access-requests/{requestId}/review", null);
         Assert.Equal(HttpStatusCode.NoContent, reviewed.StatusCode);
@@ -136,7 +146,7 @@ public sealed class AccessRequestsApiTests
     public async Task Pending_request_survives_api_restart_and_same_user_can_read_only_its_request()
     {
         var path = Path.Combine(Path.GetTempPath(), "garagewatch-tests", $"{Guid.NewGuid():N}.db");
-        Guid requestId;
+        string requestId;
         await using (var firstFactory = new ApiFactory(databasePath: path))
         {
             await CreateUserAsync(firstFactory, "durable-user");
@@ -148,7 +158,7 @@ public sealed class AccessRequestsApiTests
                 purpose = AccessRequestPurposes.LiveMonitoring
             });
             Assert.Equal(HttpStatusCode.Accepted, response.StatusCode);
-            requestId = (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+            requestId = (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("publicId").GetString()!;
         }
 
         await using var restartedFactory = new ApiFactory(databasePath: path);
@@ -156,7 +166,7 @@ public sealed class AccessRequestsApiTests
         using var persisted = await restartedUser.GetAsync("/api/v1/access-requests/mine");
         persisted.EnsureSuccessStatusCode();
         var payload = await persisted.Content.ReadFromJsonAsync<JsonElement>();
-        Assert.Equal(requestId, payload.GetProperty("request").GetProperty("id").GetGuid());
+        Assert.Equal(requestId, payload.GetProperty("request").GetProperty("publicId").GetString());
     }
 
     private static async Task<Guid> CreateUserAsync(ApiFactory factory, string username)

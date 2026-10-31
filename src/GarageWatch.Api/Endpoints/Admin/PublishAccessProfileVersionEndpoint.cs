@@ -3,6 +3,7 @@ using GarageWatch.Api.Endpoints;
 using GarageWatch.Infrastructure.Identity;
 using Microsoft.AspNetCore.Identity;
 using System.Security.Claims;
+using Microsoft.EntityFrameworkCore;
 
 namespace GarageWatch.Api.Endpoints.Admin;
 
@@ -10,9 +11,10 @@ public sealed class PublishAccessProfileVersionEndpoint() : BaseEndpoint("Access
     "Publish a profile version", "Publishes an immutable next version with optimistic concurrency. Existing user assignments remain pinned until explicitly reassigned.")
 {
     protected override RouteHandlerBuilder MapCore(IEndpointRouteBuilder routes) =>
-        routes.MapPost("/api/v1/admin/access-rules/{profileId:guid}/versions", async (Guid profileId,
+        routes.MapPost("/api/v1/admin/access-rules/{profileId}/versions", async (string profileId,
             PublishAccessProfileVersionRequest request, HttpContext context, ClaimsPrincipal principal,
-            UserManager<ApplicationUser> users, AccessProfileService profiles, CancellationToken cancellationToken) =>
+            UserManager<ApplicationUser> users, AccessProfileService profiles, IamDbContext database,
+            CancellationToken cancellationToken) =>
         {
             if (!EndpointSecurity.IsSameOrigin(context)) return Results.StatusCode(StatusCodes.Status403Forbidden);
             var actor = await users.GetUserAsync(principal);
@@ -20,7 +22,12 @@ public sealed class PublishAccessProfileVersionEndpoint() : BaseEndpoint("Access
             if (request.PermissionKeys is null) return Results.BadRequest(new ApiErrorResponse("invalid_profile"));
             try
             {
-                return Results.Ok(await profiles.PublishVersionAsync(actor.Id, profileId, request.ExpectedVersion,
+                if (!PublicIdFormat.IsValid(profileId, PublicIdPrefixes.AccessProfilePrefix))
+                    return Results.NotFound(new ApiErrorResponse("access_profile_not_found"));
+                var internalId = await database.AccessProfiles.Where(item => item.PublicId == profileId)
+                    .Select(item => (Guid?)item.Id).SingleOrDefaultAsync(cancellationToken);
+                if (internalId is null) return Results.NotFound(new ApiErrorResponse("access_profile_not_found"));
+                return Results.Ok(await profiles.PublishVersionAsync(actor.Id, internalId.Value, request.ExpectedVersion,
                     request.PermissionKeys, cancellationToken));
             }
             catch (Exception exception) when (exception is ArgumentException or InvalidOperationException or

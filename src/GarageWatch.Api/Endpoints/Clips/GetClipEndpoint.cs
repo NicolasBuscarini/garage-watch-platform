@@ -10,20 +10,20 @@ public sealed class GetClipEndpoint() : BaseEndpoint("Clips", "GetClip", "Get au
     "Resolves metadata and media references only after the current clips.read camera grant is checked.")
 {
     protected override RouteHandlerBuilder MapCore(IEndpointRouteBuilder routes) =>
-        routes.MapGet("/api/v1/clips/{clipId}", async (string clipId, ClaimsPrincipal principal,
+        routes.MapGet("/api/v1/clips/{publicId}", async (string publicId, ClaimsPrincipal principal,
             UserManager<ApplicationUser> users, ClipLibraryService library, CancellationToken cancellationToken) =>
         {
             var user = await users.GetUserAsync(principal);
             if (user is null || !user.IsActive) return Results.Unauthorized();
             var admin = await users.IsInRoleAsync(user, "Administrator");
-            var result = await library.GetAsync(user.Id, admin, clipId, cancellationToken);
+            var result = await library.GetAsync(user.Id, admin, publicId, cancellationToken);
             if (result.Details is null) return Results.NotFound();
             var detail = result.Details;
             var item = detail.Clip;
-            return Results.Ok(new ClipDetailsResponse(new ClipListItemResponse(item.ClipId, item.CameraId,
+            return Results.Ok(new ClipDetailsResponse(new ClipListItemResponse(item.PublicId, item.CameraId,
                 item.StartedAtUtc, item.EndedAtUtc, item.State, item.ArchiveStatus, item.AnalysisStatus,
                 item.ThumbnailUrl, item.SizeBytes, item.TriggerReason, item.TriggerConfigVersion), detail.MediaUrl,
-                detail.MediaSha256, detail.ThumbnailSha256, detail.SegmentIds, detail.AttemptCount, detail.UpdatedAtUtc));
+                detail.MediaSha256, detail.ThumbnailSha256, detail.AttemptCount, detail.UpdatedAtUtc));
         }).RequireAuthorization().Produces<ClipDetailsResponse>(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status401Unauthorized).Produces(StatusCodes.Status403Forbidden)
             .Produces(StatusCodes.Status404NotFound);

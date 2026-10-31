@@ -4,10 +4,11 @@
   "title": "Selective clip manifest v1",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schemaVersion", "clipId", "cameraId", "requestedStartedAt", "requestedEndedAt", "effectiveStartedAt", "effectiveEndedAt", "state", "triggerConfigVersion", "triggerReason", "segmentIds", "mediaFileName", "mediaSha256", "thumbnailFileName", "thumbnailSha256", "attemptCount", "updatedAt"],
+  "required": ["schemaVersion", "clipId", "publicId", "cameraId", "requestedStartedAt", "requestedEndedAt", "effectiveStartedAt", "effectiveEndedAt", "state", "triggerConfigVersion", "triggerReason", "segmentIds", "mediaFileName", "mediaSha256", "thumbnailFileName", "thumbnailSha256", "attemptCount", "updatedAt"],
   "properties": {
     "schemaVersion": { "const": "1.0" },
     "clipId": { "type": "string", "pattern": "^[a-f0-9]{32}$" },
+    "publicId": { "type": "string", "pattern": "^CLP[0-9]{12}$" },
     "cameraId": { "type": "string", "minLength": 1, "maxLength": 64 },
     "requestedStartedAt": { "type": "string", "format": "date-time" },
     "requestedEndedAt": { "type": "string", "format": "date-time" },

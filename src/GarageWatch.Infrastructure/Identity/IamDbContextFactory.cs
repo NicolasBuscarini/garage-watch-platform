@@ -12,6 +12,6 @@ public sealed class IamDbContextFactory : IDesignTimeDbContextFactory<IamDbConte
         var options = new DbContextOptionsBuilder<IamDbContext>()
             .UseSqlite($"Data Source={path}")
             .Options;
-        return new IamDbContext(options);
+        return new IamDbContext(options, new PublicIdGenerator());
     }
 }

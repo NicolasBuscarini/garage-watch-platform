@@ -1,8 +1,9 @@
 namespace GarageWatch.Infrastructure.Identity;
 
-public sealed class CameraContext
+public sealed class CameraContext : IHasPublicId
 {
     public string ContextId { get; set; } = string.Empty;
+    public string? PublicId { get; set; }
     public string Name { get; set; } = string.Empty;
     public bool IsEnabled { get; set; }
     public long Version { get; set; }

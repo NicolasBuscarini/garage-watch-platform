@@ -61,16 +61,27 @@ public sealed class AccessProfilesApiTests
         Guid adminId;
         Guid userId;
         string cameraId;
+        string userPublicId;
+        string adminPublicId;
+        string cameraPublicId;
+        string contextPublicId;
         using (var scope = factory.Services.CreateScope())
         {
             var services = scope.ServiceProvider;
             var users = services.GetRequiredService<UserManager<ApplicationUser>>();
             adminId = (await users.FindByNameAsync("contract-user"))!.Id;
+            adminPublicId = (await users.FindByNameAsync("contract-user"))!.PublicId!;
             cameraId = services.GetRequiredService<CaptureOptions>().CameraId;
             var user = new ApplicationUser { Id = Guid.NewGuid(), UserName = "profile-user", IsActive = true };
             Assert.True((await users.CreateAsync(user, "Profile-Password-123!")).Succeeded);
             Assert.True((await users.AddToRoleAsync(user, "User")).Succeeded);
             userId = user.Id;
+            userPublicId = user.PublicId!;
+            var database = services.GetRequiredService<IamDbContext>();
+            var camera = await database.CameraCatalog.Include(item => item.Context)
+                .SingleAsync(item => item.CameraId == cameraId);
+            cameraPublicId = camera.PublicId!;
+            contextPublicId = camera.Context.PublicId!;
         }
 
         using var admin = await LoginAsync(factory, "contract-user", "Contract-Password-123!");
@@ -88,30 +99,73 @@ public sealed class AccessProfilesApiTests
             new { name = "Garage operator", permissionKeys = new[] { "camera.list", "live.video.view" } });
         Assert.Equal(HttpStatusCode.Created, create.StatusCode);
         var created = await create.Content.ReadFromJsonAsync<JsonElement>();
-        var profileVersionId = created.GetProperty("currentVersionId").GetGuid();
-        var profileId = created.GetProperty("id").GetGuid();
+        var profileVersionId = created.GetProperty("currentVersionPublicId").GetString()!;
+        var profileId = created.GetProperty("publicId").GetString()!;
+        Assert.Equal($"/api/v1/admin/access-rules/{profileId}", create.Headers.Location?.OriginalString);
+        Assert.False(created.TryGetProperty("id", out _));
+        Assert.False(created.TryGetProperty("currentVersionId", out _));
+        Guid internalProfileId;
+        Guid internalProfileVersionId;
+        using (var scope = factory.Services.CreateScope())
+        {
+            internalProfileId = await scope.ServiceProvider.GetRequiredService<IamDbContext>().AccessProfiles
+                .Where(value => value.PublicId == profileId).Select(value => value.Id).SingleAsync();
+            internalProfileVersionId = await scope.ServiceProvider.GetRequiredService<IamDbContext>().AccessProfileVersions
+                .Where(value => value.PublicId == profileVersionId).Select(value => value.Id).SingleAsync();
+        }
+        using var legacyProfilePath = await admin.PostAsJsonAsync($"/api/v1/admin/access-rules/{internalProfileId:D}/versions",
+            new { expectedVersion = 1, permissionKeys = new[] { "live.video.view" } });
+        Assert.Equal(HttpStatusCode.NotFound, legacyProfilePath.StatusCode);
+        using var legacyUserPath = await admin.GetAsync($"/api/v1/admin/users/{userId:D}");
+        Assert.Equal(HttpStatusCode.NotFound, legacyUserPath.StatusCode);
+        using var legacyUserFilter = await admin.GetAsync($"/api/v1/admin/users?userId={userId:D}");
+        Assert.Equal(HttpStatusCode.BadRequest, legacyUserFilter.StatusCode);
 
-        using var invalidScope = await admin.PutAsJsonAsync($"/api/v1/admin/users/{userId}/access-rules", new
+        using var invalidScope = await admin.PutAsJsonAsync($"/api/v1/admin/users/{userPublicId}/access-rules", new
         {
             assignments = new[]
             {
-                new { profileVersionId, scopes = new[] { new { contextId = "wrong-context", cameraId } } }
+                new { profileVersionPublicId = profileVersionId, scopes = new[] { new { contextId = "CTX000000000099", cameraId = cameraPublicId } } }
             }
         });
         Assert.Equal(HttpStatusCode.BadRequest, invalidScope.StatusCode);
-
-        using var assign = await admin.PutAsJsonAsync($"/api/v1/admin/users/{userId}/access-rules", new
+        using var legacyIds = await admin.PutAsJsonAsync($"/api/v1/admin/users/{userPublicId}/access-rules", new
         {
             assignments = new[]
             {
-                new { profileVersionId, scopes = new[] { new { contextId = "garage", cameraId } } }
+                new { profileVersionPublicId = internalProfileVersionId.ToString("D"),
+                    scopes = new[] { new { contextId = "garage", cameraId } } }
+            }
+        });
+        Assert.Equal(HttpStatusCode.BadRequest, legacyIds.StatusCode);
+        using var legacyField = await admin.PutAsJsonAsync($"/api/v1/admin/users/{userPublicId}/access-rules", new
+        {
+            assignments = new[]
+            {
+                new { profileVersionId, scopes = new[] { new { contextId = contextPublicId, cameraId = cameraPublicId } } }
+            }
+        });
+        Assert.Equal(HttpStatusCode.BadRequest, legacyField.StatusCode);
+
+        using var assign = await admin.PutAsJsonAsync($"/api/v1/admin/users/{userPublicId}/access-rules", new
+        {
+            assignments = new[]
+            {
+                new { profileVersionPublicId = profileVersionId, scopes = new[] { new { contextId = contextPublicId, cameraId = cameraPublicId } } }
             }
         });
         Assert.Equal(HttpStatusCode.NoContent, assign.StatusCode);
 
-        using var detail = await admin.GetAsync($"/api/v1/admin/users/{userId}");
+        using var detail = await admin.GetAsync($"/api/v1/admin/users/{userPublicId}");
         var detailJson = await detail.Content.ReadFromJsonAsync<JsonElement>();
-        var assignedVersion = detailJson.GetProperty("accessProfiles")[0].GetProperty("profileVersionId").GetGuid();
+        Assert.False(detailJson.TryGetProperty("id", out _));
+        var detailAssignment = detailJson.GetProperty("accessProfiles")[0];
+        Assert.True(detailAssignment.TryGetProperty("assignmentPublicId", out _));
+        Assert.True(detailAssignment.TryGetProperty("profilePublicId", out _));
+        Assert.True(detailAssignment.TryGetProperty("profileVersionPublicId", out _));
+        Assert.False(detailAssignment.TryGetProperty("assignmentId", out _));
+        Assert.False(detailAssignment.TryGetProperty("profileVersionId", out _));
+        var assignedVersion = detailJson.GetProperty("accessProfiles")[0].GetProperty("profileVersionPublicId").GetString();
         Assert.Equal(profileVersionId, assignedVersion);
 
         using var profileUser = await LoginAsync(factory, "profile-user", "Profile-Password-123!");
@@ -121,7 +175,8 @@ public sealed class AccessProfilesApiTests
         using var cameras = await profileUser.GetAsync("/api/v1/cameras");
         cameras.EnsureSuccessStatusCode();
         var cameraList = await cameras.Content.ReadFromJsonAsync<JsonElement>();
-        Assert.Contains(cameraList.EnumerateArray(), item => item.GetProperty("cameraId").GetString() == cameraId);
+        Assert.Contains(cameraList.EnumerateArray(), item => item.GetProperty("cameraId").GetString() == cameraPublicId);
+        Assert.DoesNotContain(cameraList.EnumerateArray(), item => item.GetProperty("cameraId").GetString() == cameraId);
 
         using var publish = await admin.PostAsJsonAsync($"/api/v1/admin/access-rules/{profileId}/versions", new
         {
@@ -131,28 +186,28 @@ public sealed class AccessProfilesApiTests
         Assert.Equal(HttpStatusCode.OK, publish.StatusCode);
         var published = await publish.Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal(2, published.GetProperty("version").GetInt64());
-        using var unchangedDetail = await admin.GetAsync($"/api/v1/admin/users/{userId}");
+        using var unchangedDetail = await admin.GetAsync($"/api/v1/admin/users/{userPublicId}");
         var stillPinned = await unchangedDetail.Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal(profileVersionId,
-            stillPinned.GetProperty("accessProfiles")[0].GetProperty("profileVersionId").GetGuid());
+            stillPinned.GetProperty("accessProfiles")[0].GetProperty("profileVersionPublicId").GetString());
 
-        using var adminAssignment = await admin.PutAsJsonAsync($"/api/v1/admin/users/{adminId}/access-rules", new
+        using var adminAssignment = await admin.PutAsJsonAsync($"/api/v1/admin/users/{adminPublicId}/access-rules", new
         {
             assignments = new[]
             {
-                new { profileVersionId, scopes = new[] { new { contextId = "garage", cameraId } } }
+                new { profileVersionPublicId = profileVersionId, scopes = new[] { new { contextId = contextPublicId, cameraId = cameraPublicId } } }
             }
         });
         Assert.Equal(HttpStatusCode.Conflict, adminAssignment.StatusCode);
 
-        using var revoke = await admin.PutAsJsonAsync($"/api/v1/admin/users/{userId}/access-rules",
+        using var revoke = await admin.PutAsJsonAsync($"/api/v1/admin/users/{userPublicId}/access-rules",
             new { assignments = Array.Empty<object>() });
         Assert.Equal(HttpStatusCode.NoContent, revoke.StatusCode);
         Assert.Equal(HttpStatusCode.Unauthorized, (await profileUser.GetAsync("/api/v1/auth/me")).StatusCode);
         using var reauthenticated = await LoginAsync(factory, "profile-user", "Profile-Password-123!");
         var afterRevoke = await reauthenticated.GetFromJsonAsync<JsonElement>("/api/v1/auth/me");
         Assert.False(afterRevoke.GetProperty("canMonitor").GetBoolean());
-        using var deniedMedia = await reauthenticated.GetAsync($"/api/v1/live/{cameraId}/index.m3u8");
+        using var deniedMedia = await reauthenticated.GetAsync($"/api/v1/live/{cameraPublicId}/index.m3u8");
         Assert.Equal(HttpStatusCode.NotFound, deniedMedia.StatusCode);
     }
 

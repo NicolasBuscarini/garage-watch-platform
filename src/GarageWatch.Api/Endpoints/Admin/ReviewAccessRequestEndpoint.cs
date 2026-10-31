@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using GarageWatch.Api.Endpoints;
 using GarageWatch.Infrastructure.Identity;
+using Microsoft.EntityFrameworkCore;
 
 namespace GarageWatch.Api.Endpoints.Admin;
 
@@ -8,15 +9,20 @@ public sealed class ReviewAccessRequestEndpoint() : BaseEndpoint("User administr
     "Mark an access request reviewed", "Closes the request for follow-up only; does not grant or revoke permissions.")
 {
     protected override RouteHandlerBuilder MapCore(IEndpointRouteBuilder routes) =>
-        routes.MapPost("/api/v1/admin/access-requests/{requestId:guid}/review", async (Guid requestId,
+        routes.MapPost("/api/v1/admin/access-requests/{requestId}/review", async (string requestId,
             HttpContext context, ClaimsPrincipal principal, AccessRequestService requests,
-            CancellationToken cancellationToken) =>
+            IamDbContext database, CancellationToken cancellationToken) =>
         {
             if (!EndpointSecurity.IsSameOrigin(context)) return Results.StatusCode(StatusCodes.Status403Forbidden);
             var actorId = Guid.Parse(principal.FindFirstValue(ClaimTypes.NameIdentifier)!);
             try
             {
-                await requests.ReviewAsync(actorId, requestId, cancellationToken);
+                if (!PublicIdFormat.IsValid(requestId, PublicIdPrefixes.AccessRequestPrefix))
+                    return Results.NotFound(new ApiErrorResponse("access_request_not_found"));
+                var internalId = await database.AccessRequests.Where(item => item.PublicId == requestId)
+                    .Select(item => (Guid?)item.Id).SingleOrDefaultAsync(cancellationToken);
+                if (internalId is null) return Results.NotFound(new ApiErrorResponse("access_request_not_found"));
+                await requests.ReviewAsync(actorId, internalId.Value, cancellationToken);
                 return Results.NoContent();
             }
             catch (KeyNotFoundException)

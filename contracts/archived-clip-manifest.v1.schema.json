@@ -4,10 +4,11 @@
   "title": "Archived clip commit manifest v1",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schemaVersion", "clipId", "cameraId", "requestedStartedAt", "requestedEndedAt", "effectiveStartedAt", "effectiveEndedAt", "triggerConfigVersion", "triggerReason", "segmentIds", "mediaFileName", "mediaSizeBytes", "mediaSha256", "thumbnailFileName", "thumbnailSizeBytes", "thumbnailSha256", "archivedAt"],
+  "required": ["schemaVersion", "clipId", "publicId", "cameraId", "requestedStartedAt", "requestedEndedAt", "effectiveStartedAt", "effectiveEndedAt", "triggerConfigVersion", "triggerReason", "segmentIds", "mediaFileName", "mediaSizeBytes", "mediaSha256", "thumbnailFileName", "thumbnailSizeBytes", "thumbnailSha256", "archivedAt"],
   "properties": {
     "schemaVersion": { "const": "1.0" },
     "clipId": { "type": "string", "pattern": "^[a-f0-9]{32}$" },
+    "publicId": { "type": "string", "pattern": "^CLP[0-9]{12}$" },
     "cameraId": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" },
     "requestedStartedAt": { "type": "string", "format": "date-time" },
     "requestedEndedAt": { "type": "string", "format": "date-time" },

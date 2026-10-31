@@ -23,11 +23,12 @@ public sealed class ApiFactory : WebApplicationFactory<Program>
     private readonly string? _bootstrapUsername;
     private readonly string? _bootstrapPassword;
     private readonly string _environment;
+    private readonly IPublicIdGenerator? _publicIdGenerator;
 
     public ApiFactory(ISystemProfileSource? profileSource = null, ILoggerProvider? loggerProvider = null,
         ISegmentCaptureAdapter? captureAdapter = null, string? databasePath = null,
         string? bootstrapUsername = "contract-user", string? bootstrapPassword = "Contract-Password-123!",
-        string environment = "Testing")
+        string environment = "Testing", IPublicIdGenerator? publicIdGenerator = null)
     {
         _profileSource = profileSource;
         _loggerProvider = loggerProvider;
@@ -38,6 +39,7 @@ public sealed class ApiFactory : WebApplicationFactory<Program>
         _bootstrapUsername = bootstrapUsername;
         _bootstrapPassword = bootstrapPassword;
         _environment = environment;
+        _publicIdGenerator = publicIdGenerator;
     }
 
     public string DatabasePath => _databasePath;
@@ -61,6 +63,11 @@ public sealed class ApiFactory : WebApplicationFactory<Program>
 
         builder.ConfigureTestServices(services =>
         {
+            if (_publicIdGenerator is not null)
+            {
+                services.RemoveAll<IPublicIdGenerator>();
+                services.AddSingleton<IPublicIdGenerator>(_publicIdGenerator);
+            }
             services.Configure<SecurityStampValidatorOptions>(options => options.ValidationInterval = TimeSpan.Zero);
             var profileSource = _profileSource;
             if (profileSource is not null)

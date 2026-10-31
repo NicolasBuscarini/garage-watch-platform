@@ -36,11 +36,12 @@ public sealed class OpenApiEndpointTests
         using var admin = await LoginAsync(factory, "contract-user", "Contract-Password-123!");
         using var response = await admin.GetAsync("/openapi/v1.json");
         response.EnsureSuccessStatusCode();
-        using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var documentText = await response.Content.ReadAsStringAsync();
+        using var json = JsonDocument.Parse(documentText);
 
         var operations = json.RootElement.GetProperty("paths").EnumerateObject()
             .SelectMany(path => path.Value.EnumerateObject().Select(method => method.Value)).ToArray();
-        Assert.Equal(38, operations.Length);
+        Assert.Equal(41, operations.Length);
         var operationIds = operations.Select(operation => operation.GetProperty("operationId").GetString()).ToArray();
         Assert.Equal(operationIds.Length, operationIds.Distinct(StringComparer.Ordinal).Count());
         Assert.All(operations, operation =>
@@ -55,7 +56,7 @@ public sealed class OpenApiEndpointTests
         });
 
         var requestBodies = operations.Where(operation => operation.TryGetProperty("requestBody", out _)).ToArray();
-        Assert.Equal(13, requestBodies.Length);
+        Assert.Equal(14, requestBodies.Length);
         Assert.All(requestBodies, operation =>
         {
             var body = operation.GetProperty("requestBody");
@@ -69,10 +70,28 @@ public sealed class OpenApiEndpointTests
                 .TryGetProperty("application/vnd.apple.mpegurl", out _));
         Assert.Contains(operations, operation => operation.GetProperty("operationId").GetString() == "AdminReplaceUserAccessProfiles" &&
             operation.GetProperty("requestBody").GetProperty("content").TryGetProperty("application/json", out _));
+        Assert.Contains(operations, operation => operation.GetProperty("operationId").GetString() == "GetClipTriggerConfiguration");
+        Assert.Contains(operations, operation => operation.GetProperty("operationId").GetString() == "UpdateClipTriggerConfiguration" &&
+            operation.GetProperty("requestBody").GetProperty("content").TryGetProperty("application/json", out _));
+        Assert.Contains(operations, operation => operation.GetProperty("operationId").GetString() == "GetClipAnalysisDispatchPolicy");
         Assert.Contains(operations, operation => operation.GetProperty("operationId").GetString() == "GetSystemProfile" &&
             operation.TryGetProperty("security", out _));
         Assert.Contains(operations, operation => operation.GetProperty("operationId").GetString() == "GetSession" &&
             !operation.TryGetProperty("security", out _));
+
+        var schemas = json.RootElement.GetProperty("components").GetProperty("schemas");
+        Assert.Contains(schemas.EnumerateObject(), schema => schema.Value.TryGetProperty("properties", out var properties) &&
+            properties.TryGetProperty("publicId", out var publicId) &&
+            publicId.GetProperty("type").GetString() == "string");
+        Assert.DoesNotContain("\"currentVersionId\"", documentText, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"assignmentId\"", documentText, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"profileVersionId\"", documentText, StringComparison.Ordinal);
+        var contractPropertyNames = schemas.EnumerateObject()
+            .Where(schema => schema.Value.TryGetProperty("properties", out _))
+            .SelectMany(schema => schema.Value.GetProperty("properties").EnumerateObject())
+            .Select(property => property.Name).ToArray();
+        Assert.DoesNotContain(contractPropertyNames, name => name is "id" or "userId" or "profileId" or
+            "assignmentId" or "profileVersionId" or "clipId");
     }
 
     [Fact]
