@@ -64,12 +64,18 @@ public static class DependencyInjection
         services.AddScoped(provider => IdentityBootstrapOptions.FromConfiguration(
             provider.GetRequiredService<IConfiguration>()));
         var captureOptions = CaptureOptions.FromEnvironment(configuration);
+        var triggerOptions = ClipTriggerOptions.FromEnvironment(configuration);
         services.AddSingleton(captureOptions);
+        services.AddSingleton(triggerOptions);
         services.AddSingleton<LocalSegmentSpool>();
         services.AddSingleton<ISegmentCaptureAdapter>(captureOptions.Profile == "synthetic"
             ? new SyntheticSegmentCaptureAdapter(captureOptions)
             : new FfmpegRtspCaptureAdapter(captureOptions));
+        services.AddSingleton<IVisualChangeDetector, FfmpegVisualChangeDetector>();
+        services.AddSingleton<IClipMediaAssembler, LocalClipMediaAssembler>();
+        services.AddSingleton<ClipTriggerWorker>();
         services.AddSingleton<CaptureWorker>();
+        services.AddSingleton<IHostedService>(provider => provider.GetRequiredService<ClipTriggerWorker>());
         services.AddSingleton<IHostedService>(provider => provider.GetRequiredService<CaptureWorker>());
         return services;
     }

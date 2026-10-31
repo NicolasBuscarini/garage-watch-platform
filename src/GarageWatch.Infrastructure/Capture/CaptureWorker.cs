@@ -9,7 +9,8 @@ public sealed class CaptureWorker(
     CaptureOptions options,
     ISegmentCaptureAdapter adapter,
     LocalSegmentSpool spool,
-    ILogger<CaptureWorker> logger) : BackgroundService
+    ILogger<CaptureWorker> logger,
+    ClipTriggerWorker? clipTrigger = null) : BackgroundService
 {
     private static readonly System.Text.Json.JsonSerializerOptions JsonOptions = new(System.Text.Json.JsonSerializerDefaults.Web);
     private static readonly Meter Meter = new("GarageWatch.Capture", "1.0.0");
@@ -67,6 +68,7 @@ public sealed class CaptureWorker(
                     SegmentDuration.Record(Math.Max(0, (segment.EndedAt - segment.StartedAt).TotalSeconds), metricTags);
                     logger.LogInformation("Segmento de captura confirmado: {SegmentId}, {SizeBytes} bytes", manifest.SegmentId, manifest.SizeBytes);
                     UpdateRetainedSegments(EnforceRetention());
+                    clipTrigger?.TryEnqueue(manifest);
                 }
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }
@@ -142,8 +144,10 @@ public sealed class CaptureWorker(
     {
         var manifests = Directory.GetFiles(Path.Combine(options.SpoolDirectory, "manifests"), "*.json")
             .OrderBy(File.GetCreationTimeUtc).ToArray();
+        var pinned = spool.GetPinnedSegmentIds();
         var retained = manifests.Length;
-        foreach (var old in manifests.Take(Math.Max(0, manifests.Length - options.MaximumSegments)))
+        foreach (var old in manifests.Where(path => !pinned.Contains(Path.GetFileNameWithoutExtension(path)))
+                     .Take(Math.Max(0, manifests.Length - options.MaximumSegments)))
         {
             var segmentId = Path.GetFileNameWithoutExtension(old);
             try

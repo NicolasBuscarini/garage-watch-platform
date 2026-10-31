@@ -44,6 +44,34 @@ public sealed class LocalSegmentSpool(CaptureOptions options)
         return recent.OrderBy(item => item.Manifest.StartedAt).TakeLast(maximum).ToArray();
     }
 
+    public string? TryGetSegmentPath(SegmentManifestV1 manifest)
+    {
+        if (!IsValidManifest(manifest, manifest.SegmentId, options.CameraId, options.MaximumSegmentBytes)) return null;
+        var path = Path.Combine(_segmentDirectory, manifest.FileName);
+        return File.Exists(path) && new FileInfo(path).Length == manifest.SizeBytes ? path : null;
+    }
+
+    public IReadOnlySet<string> GetPinnedSegmentIds()
+    {
+        var directory = Path.Combine(options.SpoolDirectory, "clips", "manifests");
+        if (!Directory.Exists(directory)) return new HashSet<string>(StringComparer.Ordinal);
+        var pinned = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var path in Directory.EnumerateFiles(directory, "*.json"))
+        {
+            try
+            {
+                using var document = JsonDocument.Parse(File.ReadAllText(path));
+                var root = document.RootElement;
+                if (!root.TryGetProperty("state", out var state) || state.GetString() != "collecting"
+                    || !root.TryGetProperty("segmentIds", out var ids) || ids.ValueKind != JsonValueKind.Array) continue;
+                foreach (var id in ids.EnumerateArray().Select(value => value.GetString()))
+                    if (id is not null && IsSafeSegmentId(id)) pinned.Add(id);
+            }
+            catch (JsonException) { }
+        }
+        return pinned;
+    }
+
     public async Task<SegmentManifestV1> StoreAsync(CapturedSegment segment, string epoch, CancellationToken cancellationToken)
     {
         if (segment.EndedAt < segment.StartedAt)

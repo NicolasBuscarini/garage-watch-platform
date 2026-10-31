@@ -296,6 +296,254 @@ public sealed class CapturePipelineTests
         }
     }
 
+    [Fact]
+    public async Task Triggered_clip_is_bounded_and_recovers_as_a_single_ready_manifest()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "garagewatch-clip-tests", Guid.NewGuid().ToString("N"));
+        var capture = new CaptureOptions("synthetic", "garage-01", root, 1, 1, 1_048_576, null, "ffmpeg", "ffprobe");
+        var triggerOptions = new ClipTriggerOptions(true, 1, 64, 64, 24, .05, 0, 10, 0, 120, 2);
+        var spool = new LocalSegmentSpool(capture);
+        var trigger = new ClipTriggerWorker(capture, triggerOptions, spool, new SecondSegmentDetector(),
+            new ContractClipAssembler(), NullLogger<ClipTriggerWorker>.Instance);
+        await trigger.StartAsync(CancellationToken.None);
+        try
+        {
+            var segments = new List<SegmentManifestV1>();
+            for (var index = 0; index < 3; index++)
+            {
+                var sourceDirectory = Path.Combine(root, "input");
+                Directory.CreateDirectory(sourceDirectory);
+                var sourcePath = Path.Combine(sourceDirectory, $"{index}.ts");
+                await File.WriteAllBytesAsync(sourcePath, [(byte)index, 0x47]);
+                var endedAt = DateTimeOffset.UtcNow.AddSeconds(index);
+                segments.Add(await spool.StoreAsync(new CapturedSegment(sourcePath, endedAt.AddSeconds(-1), endedAt),
+                    Guid.NewGuid().ToString(), CancellationToken.None));
+            }
+            Assert.True(trigger.TryEnqueue(segments[0]));
+            Assert.True(trigger.TryEnqueue(segments[1]));
+            var path = await WaitForManifestAsync(Path.Combine(root, "clips", "manifests"), TimeSpan.FromSeconds(5));
+            var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(2);
+            ClipManifestV1? clip = null;
+            while (DateTime.UtcNow < deadline)
+            {
+                clip = JsonSerializer.Deserialize<ClipManifestV1>(await File.ReadAllTextAsync(path), JsonOptions);
+                if (clip?.State == "ready") break;
+                await Task.Delay(25);
+            }
+            Assert.NotNull(clip);
+            Assert.Equal("ready", clip.State);
+            Assert.NotEmpty(clip.SegmentIds);
+            Assert.NotNull(clip.MediaSha256);
+            Assert.Empty(spool.GetPinnedSegmentIds());
+            using var payload = JsonDocument.Parse(await File.ReadAllTextAsync(path));
+            AssertContractProperties(payload, "clip-manifest.v1.schema.json");
+        }
+        finally
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+            await trigger.StopAsync(timeout.Token);
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Collecting_clip_manifest_pins_only_its_safe_segment_ids()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "garagewatch-clip-tests", Guid.NewGuid().ToString("N"));
+        var capture = new CaptureOptions("synthetic", "garage-01", root, 1, 1, 1_048_576, null, "ffmpeg", "ffprobe");
+        var spool = new LocalSegmentSpool(capture);
+        var id = Guid.NewGuid().ToString("N");
+        var other = Guid.NewGuid().ToString("N");
+        var directory = Path.Combine(root, "clips", "manifests");
+        Directory.CreateDirectory(directory);
+        var clip = new ClipManifestV1("1.0", Guid.NewGuid().ToString("N"), "garage-01", DateTimeOffset.UtcNow,
+            DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, "collecting", "trigger-v1", "visual_change",
+            [id, "unsafe"], null, null, null, null, 0, DateTimeOffset.UtcNow);
+        await File.WriteAllTextAsync(Path.Combine(directory, clip.ClipId + ".json"), JsonSerializer.Serialize(clip, JsonOptions));
+        try
+        {
+            Assert.Contains(id, spool.GetPinnedSegmentIds());
+            Assert.DoesNotContain("unsafe", spool.GetPinnedSegmentIds());
+            Assert.DoesNotContain(other, spool.GetPinnedSegmentIds());
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Visual_detector_suppresses_global_change_and_honors_zone_and_masks()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "garagewatch-clip-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        var capture = new CaptureOptions("synthetic", "garage-01", root, 1, 4, 1_048_576, null, "ffmpeg", "ffprobe");
+        var options = new ClipTriggerOptions(true, 1, 64, 64, 24, .05, 0, 0, 0, 120, 2);
+        try
+        {
+            var black = await CreateColorSegmentAsync(root, "black", "black.ts");
+            var white = await CreateColorSegmentAsync(root, "white", "white.ts");
+            var local = await CreateColorSegmentAsync(root, "black", "local.ts", "drawbox=x=0:y=0:w=16:h=16:color=white:t=fill");
+            var detector = new FfmpegVisualChangeDetector(capture, options);
+
+            Assert.False(await detector.HasRelevantChangeAsync(black, CancellationToken.None));
+            Assert.False(await detector.HasRelevantChangeAsync(white, CancellationToken.None));
+            var localDetector = new FfmpegVisualChangeDetector(capture, options);
+            Assert.False(await localDetector.HasRelevantChangeAsync(black, CancellationToken.None));
+            Assert.True(await localDetector.HasRelevantChangeAsync(local, CancellationToken.None));
+
+            var masked = new FfmpegVisualChangeDetector(capture, options with
+            {
+                Masks = [new NormalizedRectangle(0, 0, .5, .5)]
+            });
+            Assert.False(await masked.HasRelevantChangeAsync(black, CancellationToken.None));
+            Assert.False(await masked.HasRelevantChangeAsync(local, CancellationToken.None));
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Visual_detector_applies_pixel_delta_and_changed_area_thresholds()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "garagewatch-clip-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        var capture = new CaptureOptions("synthetic", "garage-01", root, 1, 4, 1_048_576, null, "ffmpeg", "ffprobe");
+        try
+        {
+            var black = await CreateColorSegmentAsync(root, "black", "black.ts");
+            var local = await CreateColorSegmentAsync(root, "black", "local.ts", "drawbox=x=0:y=0:w=16:h=16:color=white:t=fill");
+            var acceptsArea = new ClipTriggerOptions(true, 1, 64, 64, 24, .05, 0, 0, 0, 120, 2);
+            var rejectsArea = acceptsArea with { ChangedAreaRatio = .10 };
+            var rejectsDelta = acceptsArea with { PixelDelta = 256 };
+
+            var areaDetector = new FfmpegVisualChangeDetector(capture, acceptsArea);
+            Assert.False(await areaDetector.HasRelevantChangeAsync(black, CancellationToken.None));
+            Assert.True(await areaDetector.HasRelevantChangeAsync(local, CancellationToken.None));
+
+            var strictAreaDetector = new FfmpegVisualChangeDetector(capture, rejectsArea);
+            Assert.False(await strictAreaDetector.HasRelevantChangeAsync(black, CancellationToken.None));
+            Assert.False(await strictAreaDetector.HasRelevantChangeAsync(local, CancellationToken.None));
+
+            var strictDeltaDetector = new FfmpegVisualChangeDetector(capture, rejectsDelta);
+            Assert.False(await strictDeltaDetector.HasRelevantChangeAsync(black, CancellationToken.None));
+            Assert.False(await strictDeltaDetector.HasRelevantChangeAsync(local, CancellationToken.None));
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Cooldown_suppresses_consecutive_triggered_segments_without_blocking_the_queue()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "garagewatch-clip-tests", Guid.NewGuid().ToString("N"));
+        var capture = new CaptureOptions("synthetic", "garage-01", root, 1, 4, 1_048_576, null, "ffmpeg", "ffprobe");
+        var options = new ClipTriggerOptions(true, 1, 64, 64, 24, .05, 60, 0, 0, 120, 4);
+        var spool = new LocalSegmentSpool(capture);
+        Directory.CreateDirectory(Path.Combine(root, "input"));
+        var manifests = new List<SegmentManifestV1>();
+        for (var index = 0; index < 3; index++)
+        {
+            var source = Path.Combine(root, "input", $"{index}.ts");
+            await File.WriteAllBytesAsync(source, [(byte)index, 0x47]);
+            var endedAt = DateTimeOffset.UtcNow.AddSeconds(index);
+            manifests.Add(await spool.StoreAsync(new CapturedSegment(source, endedAt.AddSeconds(-1), endedAt),
+                Guid.NewGuid().ToString(), CancellationToken.None));
+        }
+        var worker = new ClipTriggerWorker(capture, options, spool, new AlwaysChangedDetector(), new ContractClipAssembler(),
+            NullLogger<ClipTriggerWorker>.Instance);
+        await worker.StartAsync(CancellationToken.None);
+        try
+        {
+            Assert.All(manifests, manifest => Assert.True(worker.TryEnqueue(manifest)));
+            var directory = Path.Combine(root, "clips", "manifests");
+            _ = await WaitForManifestAsync(directory, TimeSpan.FromSeconds(5));
+            await Task.Delay(200);
+            Assert.Single(Directory.GetFiles(directory, "*.json"));
+        }
+        finally
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+            await worker.StopAsync(timeout.Token);
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Local_assembler_creates_checked_media_and_thumbnail_from_real_segments()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "garagewatch-clip-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        var capture = new CaptureOptions("synthetic", "garage-01", root, 1, 4, 1_048_576, null, "ffmpeg", "ffprobe");
+        var clip = new ClipManifestV1("1.0", Guid.NewGuid().ToString("N"), "garage-01", DateTimeOffset.UtcNow,
+            DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, "collecting", "trigger-v1", "test",
+            [Guid.NewGuid().ToString("N")], null, null, null, null, 0, DateTimeOffset.UtcNow);
+        try
+        {
+            var segment = await CreateColorSegmentAsync(root, "blue", "input.ts");
+            var result = await new LocalClipMediaAssembler(capture).AssembleAsync(clip, [segment], CancellationToken.None);
+            var media = Path.Combine(root, "clips", "media", result.MediaFileName);
+            var thumbnail = Path.Combine(root, "clips", "thumbnails", result.ThumbnailFileName);
+
+            Assert.True(File.Exists(media));
+            Assert.True(File.Exists(thumbnail));
+            Assert.True(new FileInfo(thumbnail).Length > 100);
+            Assert.Matches("^[a-f0-9]{64}$", result.MediaSha256);
+            Assert.Matches("^[a-f0-9]{64}$", result.ThumbnailSha256);
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Restart_recovers_collecting_clip_once_when_referenced_segments_remain()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "garagewatch-clip-tests", Guid.NewGuid().ToString("N"));
+        var capture = new CaptureOptions("synthetic", "garage-01", root, 1, 4, 1_048_576, null, "ffmpeg", "ffprobe");
+        var options = new ClipTriggerOptions(true, 1, 64, 64, 24, .05, 0, 0, 0, 120, 2);
+        var spool = new LocalSegmentSpool(capture);
+        Directory.CreateDirectory(Path.Combine(root, "input"));
+        var source = Path.Combine(root, "input", "segment.ts");
+        await File.WriteAllBytesAsync(source, [0x47, 0x01]);
+        var now = DateTimeOffset.UtcNow;
+        var segment = await spool.StoreAsync(new CapturedSegment(source, now.AddSeconds(-1), now), Guid.NewGuid().ToString(), CancellationToken.None);
+        var clip = new ClipManifestV1("1.0", Guid.NewGuid().ToString("N"), "garage-01", now.AddSeconds(-1), now,
+            now.AddSeconds(-1), now, "collecting", "trigger-v1", "recovery", [segment.SegmentId], null, null, null, null, 0, now);
+        var directory = Path.Combine(root, "clips", "manifests");
+        Directory.CreateDirectory(directory);
+        var manifestPath = Path.Combine(directory, clip.ClipId + ".json");
+        await File.WriteAllTextAsync(manifestPath, JsonSerializer.Serialize(clip, JsonOptions));
+        var worker = new ClipTriggerWorker(capture, options, spool, new SecondSegmentDetector(), new ContractClipAssembler(),
+            NullLogger<ClipTriggerWorker>.Instance);
+        await worker.StartAsync(CancellationToken.None);
+        try
+        {
+            var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(3);
+            ClipManifestV1? recovered = null;
+            while (DateTime.UtcNow < deadline)
+            {
+                recovered = JsonSerializer.Deserialize<ClipManifestV1>(await File.ReadAllTextAsync(manifestPath), JsonOptions);
+                if (recovered?.State == "ready") break;
+                await Task.Delay(25);
+            }
+            Assert.NotNull(recovered);
+            Assert.Equal("ready", recovered.State);
+            Assert.Equal(1, recovered.AttemptCount);
+        }
+        finally
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+            await worker.StopAsync(timeout.Token);
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
     private static async Task<string> WaitForManifestAsync(string root, TimeSpan timeout)
     {
         var deadline = DateTime.UtcNow + timeout;
@@ -306,6 +554,15 @@ public sealed class CapturePipelineTests
             await Task.Delay(25);
         }
         throw new TimeoutException("Capture worker did not persist a manifest.");
+    }
+
+    private static async Task<string> CreateColorSegmentAsync(string directory, string color, string fileName, string? filter = null)
+    {
+        var path = Path.Combine(directory, fileName);
+        await RunMediaToolAsync("ffmpeg", ["-nostdin", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i",
+            filter is null ? $"color=c={color}:s=64x64:r=5" : $"color=c={color}:s=64x64:r=5,{filter}", "-t", "1", "-an", "-c:v", "libx264", "-preset", "ultrafast",
+            "-pix_fmt", "yuv420p", "-f", "mpegts", path], readBinaryOutput: false);
+        return path;
     }
 
     private static async Task<(string TextOutput, byte[] BinaryOutput)> RunMediaToolAsync(string executable,
@@ -483,4 +740,24 @@ public sealed class CapturePipelineTests
             throw new InvalidOperationException("contract_source_unavailable");
         }
     }
+
+    private sealed class SecondSegmentDetector : IVisualChangeDetector
+    {
+        private int calls;
+        public Task<bool> HasRelevantChangeAsync(string segmentPath, CancellationToken cancellationToken) =>
+            Task.FromResult(Interlocked.Increment(ref calls) == 2);
+    }
+
+    private sealed class AlwaysChangedDetector : IVisualChangeDetector
+    {
+        public Task<bool> HasRelevantChangeAsync(string segmentPath, CancellationToken cancellationToken) => Task.FromResult(true);
+    }
+
+    private sealed class ContractClipAssembler : IClipMediaAssembler
+    {
+        public Task<(string MediaFileName, string MediaSha256, string ThumbnailFileName, string ThumbnailSha256)> AssembleAsync(
+            ClipManifestV1 clip, IReadOnlyList<string> segmentPaths, CancellationToken cancellationToken) =>
+            Task.FromResult(($"{clip.ClipId}.ts", new string('a', 64), $"{clip.ClipId}.jpg", new string('b', 64)));
+    }
+
 }
