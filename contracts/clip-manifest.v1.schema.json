@@ -22,6 +22,11 @@
     "thumbnailFileName": { "type": ["string", "null"] },
     "thumbnailSha256": { "type": ["string", "null"], "pattern": "^[a-f0-9]{64}$" },
     "attemptCount": { "type": "integer", "minimum": 0 },
-    "updatedAt": { "type": "string", "format": "date-time" }
+    "updatedAt": { "type": "string", "format": "date-time" },
+    "archiveStatus": { "enum": ["not_requested", "pending", "copying", "verifying", "archived", "retry_wait", "failed"] },
+    "archiveAttemptCount": { "type": "integer", "minimum": 0 },
+    "archiveNextAttemptAt": { "type": ["string", "null"], "format": "date-time" },
+    "archivedAt": { "type": ["string", "null"], "format": "date-time" },
+    "archiveManifestSha256": { "type": ["string", "null"], "pattern": "^[a-f0-9]{64}$" }
   }
 }

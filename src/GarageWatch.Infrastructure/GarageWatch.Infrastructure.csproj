@@ -6,6 +6,7 @@
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
     <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" />
+    <PackageReference Include="Microsoft.ML.OnnxRuntime" />
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <ProjectReference Include="../GarageWatch.Application/GarageWatch.Application.csproj" />
     <ProjectReference Include="../GarageWatch.Domain/GarageWatch.Domain.csproj" />

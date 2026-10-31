@@ -13,6 +13,8 @@ public static class ApiEndpointRegistration
             new AccessRequests.CreateAccessRequestEndpoint(), new AccessRequests.GetMyAccessRequestEndpoint(),
             new Cameras.ListCamerasEndpoint(),
             new Clips.UpdateClipAnalysisDispatchPolicyEndpoint(), new Clips.CreateClipAnalysisRequestEndpoint(),
+            new Clips.ListClipsEndpoint(), new Clips.GetClipEndpoint(), new Clips.GetClipMediaEndpoint(),
+            new Clips.GetClipThumbnailEndpoint(),
             new Admin.ListContextsEndpoint(), new Admin.CreateContextEndpoint(),
             new Admin.UpdateContextEndpoint(), new Admin.DeactivateContextEndpoint(),
             new Admin.ListCamerasEndpoint(), new Admin.CreateCameraEndpoint(),

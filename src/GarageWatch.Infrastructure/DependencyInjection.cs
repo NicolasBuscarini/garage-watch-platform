@@ -5,6 +5,10 @@ using GarageWatch.Application.Authorization;
 using GarageWatch.Infrastructure.Capture;
 using GarageWatch.Infrastructure.Identity;
 using GarageWatch.Infrastructure.Identity.Repositories;
+using GarageWatch.Infrastructure.Analysis;
+using GarageWatch.Application.Analysis;
+using GarageWatch.Infrastructure.Events;
+using GarageWatch.Application.Events;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
@@ -67,19 +71,36 @@ public static class DependencyInjection
         var captureOptions = CaptureOptions.FromEnvironment(configuration);
         var triggerOptions = ClipTriggerOptions.FromEnvironment(configuration);
         var clipAnalysisOptions = ClipAnalysisDispatchOptions.FromConfiguration(configuration);
+        var detectorOptions = OnnxDetectorOptions.FromConfiguration(configuration);
+        var eventOptions = EventEngineOptions.FromConfiguration(configuration, captureOptions);
+        var clipArchiveOptions = ClipArchiveOptions.FromConfiguration(configuration, captureOptions);
         services.AddSingleton(captureOptions);
         services.AddSingleton(triggerOptions);
         services.AddSingleton(clipAnalysisOptions);
+        services.AddSingleton(detectorOptions);
+        services.AddSingleton(eventOptions);
+        services.AddSingleton(clipArchiveOptions);
+        services.AddSingleton<VersionedEventRuleEngine>();
+        services.AddSingleton<LocalEventJournal>();
         services.AddSingleton<LocalSegmentSpool>();
         services.AddSingleton<ISegmentCaptureAdapter>(captureOptions.Profile == "synthetic"
             ? new SyntheticSegmentCaptureAdapter(captureOptions)
             : new FfmpegRtspCaptureAdapter(captureOptions));
         services.AddSingleton<IVisualChangeDetector, FfmpegVisualChangeDetector>();
+        services.AddSingleton<IObjectDetector, OnnxObjectDetector>();
+        services.AddSingleton<IObjectTracker, GreedyIouObjectTracker>();
+        services.AddSingleton<DetectionProcessor>();
+        services.AddSingleton<ObjectDetectionWorker>();
         services.AddSingleton<IClipMediaAssembler, LocalClipMediaAssembler>();
+        services.AddSingleton<IClipArchiveAdapter, LocalFilesystemClipArchiveAdapter>();
+        services.AddSingleton<ClipArchiveWorker>();
+        services.AddScoped<ClipLibraryService>();
         services.AddSingleton<IClipAnalysisAutoDispatcher, ClipAnalysisAutoDispatcher>();
         services.AddSingleton<ClipTriggerWorker>();
         services.AddSingleton<CaptureWorker>();
         services.AddSingleton<IHostedService>(provider => provider.GetRequiredService<ClipTriggerWorker>());
+        services.AddSingleton<IHostedService>(provider => provider.GetRequiredService<ClipArchiveWorker>());
+        services.AddSingleton<IHostedService>(provider => provider.GetRequiredService<ObjectDetectionWorker>());
         services.AddSingleton<IHostedService>(provider => provider.GetRequiredService<CaptureWorker>());
         return services;
     }

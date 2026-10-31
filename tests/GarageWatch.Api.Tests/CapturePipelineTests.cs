@@ -616,8 +616,9 @@ public sealed class CapturePipelineTests
         var actualProperties = payload.RootElement.EnumerateObject()
             .Select(property => property.Name).ToHashSet(StringComparer.Ordinal);
         Assert.Equal("https://json-schema.org/draft/2020-12/schema", schema.RootElement.GetProperty("$schema").GetString());
-        Assert.True(required.SetEquals(schemaProperties));
-        Assert.True(required.SetEquals(actualProperties));
+        Assert.Subset(schemaProperties, required);
+        Assert.Subset(schemaProperties, actualProperties);
+        Assert.Subset(actualProperties, required);
     }
 
     private sealed class OneSegmentThenWaitAdapter : ISegmentCaptureAdapter

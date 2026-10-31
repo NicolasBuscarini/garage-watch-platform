@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://garage-watch.local/contracts/event-rules.v1.schema.json",
+  "title": "GarageWatch event rule set v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "configVersion", "contextId", "cameraId", "rules"],
+  "properties": {
+    "schemaVersion": { "const": "1.0" },
+    "configVersion": { "type": "string", "pattern": "^[A-Za-z0-9._-]{1,64}$" },
+    "contextId": { "type": "string", "pattern": "^[A-Za-z0-9._-]{1,64}$" },
+    "cameraId": { "type": "string", "pattern": "^[A-Za-z0-9._-]{1,64}$" },
+    "rules": {
+      "type": "array", "maxItems": 32,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["ruleId", "ruleVersion", "kind", "eventType", "alertLevel", "cooldownSeconds", "maximumObservationGapSeconds", "targetClass", "minimumScore"],
+        "properties": {
+          "ruleId": { "type": "string", "pattern": "^[A-Za-z0-9._-]{1,64}$" },
+          "ruleVersion": { "type": "integer", "minimum": 1 },
+          "kind": { "enum": ["zoneDwell", "lineCrossing"] },
+          "eventType": { "type": "string", "pattern": "^[A-Za-z0-9._-]{1,64}$" },
+          "alertLevel": { "enum": ["informational", "attention", "critical"] },
+          "cooldownSeconds": { "type": "integer", "minimum": 0, "maximum": 86400 },
+          "maximumObservationGapSeconds": { "type": "integer", "minimum": 1, "maximum": 3600 },
+          "targetClass": { "type": "string", "pattern": "^[A-Za-z0-9._-]{1,64}$" },
+          "minimumScore": { "type": "number", "minimum": 0, "maximum": 1 },
+          "zonePolygon": { "type": "array", "minItems": 3, "maxItems": 64, "items": { "$ref": "#/$defs/point" } },
+          "lineStart": { "$ref": "#/$defs/point" },
+          "lineEnd": { "$ref": "#/$defs/point" },
+          "direction": { "enum": ["both", "positiveToNegative", "negativeToPositive"] },
+          "minimumDwellSeconds": { "type": "number", "minimum": 0, "maximum": 86400 }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "point": {
+      "type": "object", "additionalProperties": false, "required": ["x", "y"],
+      "properties": { "x": { "type": "number", "minimum": 0, "maximum": 1 }, "y": { "type": "number", "minimum": 0, "maximum": 1 } }
+    }
+  }
+}

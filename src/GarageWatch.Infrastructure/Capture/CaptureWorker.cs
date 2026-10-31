@@ -2,6 +2,7 @@ using System.Diagnostics.Metrics;
 using System.Diagnostics;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using GarageWatch.Infrastructure.Analysis;
 
 namespace GarageWatch.Infrastructure.Capture;
 
@@ -10,7 +11,8 @@ public sealed class CaptureWorker(
     ISegmentCaptureAdapter adapter,
     LocalSegmentSpool spool,
     ILogger<CaptureWorker> logger,
-    ClipTriggerWorker? clipTrigger = null) : BackgroundService
+    ClipTriggerWorker? clipTrigger = null,
+    ObjectDetectionWorker? detectionWorker = null) : BackgroundService
 {
     private static readonly System.Text.Json.JsonSerializerOptions JsonOptions = new(System.Text.Json.JsonSerializerDefaults.Web);
     private static readonly Meter Meter = new("GarageWatch.Capture", "1.0.0");
@@ -69,6 +71,7 @@ public sealed class CaptureWorker(
                     logger.LogInformation("Segmento de captura confirmado: {SegmentId}, {SizeBytes} bytes", manifest.SegmentId, manifest.SizeBytes);
                     UpdateRetainedSegments(EnforceRetention());
                     clipTrigger?.TryEnqueue(manifest);
+                    detectionWorker?.TryEnqueue(manifest, Path.Combine(options.SpoolDirectory, "segments", manifest.FileName));
                 }
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }

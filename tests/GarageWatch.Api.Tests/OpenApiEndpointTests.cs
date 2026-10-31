@@ -40,7 +40,7 @@ public sealed class OpenApiEndpointTests
 
         var operations = json.RootElement.GetProperty("paths").EnumerateObject()
             .SelectMany(path => path.Value.EnumerateObject().Select(method => method.Value)).ToArray();
-        Assert.Equal(34, operations.Length);
+        Assert.Equal(38, operations.Length);
         var operationIds = operations.Select(operation => operation.GetProperty("operationId").GetString()).ToArray();
         Assert.Equal(operationIds.Length, operationIds.Distinct(StringComparer.Ordinal).Count());
         Assert.All(operations, operation =>

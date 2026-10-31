@@ -20,7 +20,12 @@ public sealed record ClipManifestV1(
     string? ThumbnailFileName,
     string? ThumbnailSha256,
     int AttemptCount,
-    DateTimeOffset UpdatedAt);
+    DateTimeOffset UpdatedAt,
+    string ArchiveStatus = "not_requested",
+    int ArchiveAttemptCount = 0,
+    DateTimeOffset? ArchiveNextAttemptAt = null,
+    DateTimeOffset? ArchivedAt = null,
+    string? ArchiveManifestSha256 = null);
 
 public interface IClipMediaAssembler
 {

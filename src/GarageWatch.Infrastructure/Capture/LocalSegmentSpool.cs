@@ -217,6 +217,6 @@ public sealed class LocalSegmentSpool(CaptureOptions options)
         && manifest.EndedAt >= manifest.StartedAt
         && manifest.Sha256 is { Length: 64 } hash && hash.All(Uri.IsHexDigit);
 
-    public static bool IsSafeSegmentId(string value) => value.Length == 32
+    public static bool IsSafeSegmentId(string? value) => value is { Length: 32 }
         && value.All(character => character is >= '0' and <= '9' or >= 'a' and <= 'f');
 }

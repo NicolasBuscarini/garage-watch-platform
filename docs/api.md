@@ -25,9 +25,10 @@ Ambos existem somente nos ambientes ASP.NET Core Development/Testing e exigem co
 | Access profiles | Catálogo delegável, criação de perfis nomeados e publicação de versões imutáveis Admin-only |
 | Live video | Playlist HLS e segmentos com suporte Range, após autorização por câmera |
 | Clip analysis | Política versionada por câmera e pedido idempotente de análise de clipe íntegro |
+| Clips | Timeline paginada, filtro de período/estado/câmera, detalhe, thumbnail e mídia; autenticação + `clips.read` por par câmera/contexto; hash validado e Range na mídia |
 | System | Perfil sanitizado do serviço |
 
-Cada operação publicada inclui operationId único, resumo/descrição, parâmetros/JSON body quando aplicável, schemas concretos e status de sucesso/erro. Respostas HLS declaram `application/vnd.apple.mpegurl` e `video/mp2t`; Range declara `206`. O schema reflete a API atualmente implementada, não significa que eventos/clipes/regras de IA já tenham endpoints.
+Cada operação publicada inclui operationId único, resumo/descrição, parâmetros/JSON body quando aplicável, schemas concretos e status de sucesso/erro. Respostas HLS/clipe declaram seus media types e Range declara `206`. Endpoints de clipes são dev-only e limitam listagem a 10.000 manifests por chamada, páginas a 100 itens e mídia a IDs locais; não aceitam caminho fornecido pelo cliente.
 
 Gestão de acesso usa `GET /api/v1/admin/permission-catalog`, `GET/POST /api/v1/admin/access-rules`, `POST /api/v1/admin/access-rules/{profileId}/versions` e `PUT /api/v1/admin/users/{userId}/access-rules`. `GET /api/v1/admin/users` aceita `page`/`pageSize` (máximo 100) e filtro opcional `userId`; o resultado continua minimizado e paginado. A conta recebe referências a versões de perfis e escopos de pares exatos `{contextId,cameraId}`; request de usuário não aceita permission keys. Administrator é reservado e não pode receber perfil. A migração mantém os grants legados e cria atribuições ao perfil somente-vídeo com o mesmo escopo; depois da migração, autorização efetiva consulta somente perfis. `live.audio.listen` não é delegável até existir rendition isolada de áudio no servidor.
 

@@ -1,6 +1,8 @@
 services:
   api:
     image: garage-watch-platform-dev
+    cpus: "${PLATFORM_API_CPUS:-2.0}"
+    mem_limit: "${PLATFORM_API_MEMORY_LIMIT:-3g}"
     build:
       context: .
       additional_contexts:
@@ -14,6 +16,8 @@ services:
     volumes:
       - .:/workspace
       - ./data:/data
+      - "${CAPTURE_DATA_HOST_DIR:-./data/capture}:/capture-data"
+      - "${CLIP_ARCHIVE_HOST_DIR:-./data/archive}:/archive-data"
     environment:
       ASPNETCORE_ENVIRONMENT: Development
       ASPNETCORE_URLS: http://0.0.0.0:8080
@@ -23,7 +27,7 @@ services:
       CAPTURE_PROFILE: "${CAPTURE_PROFILE:-synthetic}"
       CAPTURE_AUDIO_ENABLED: "${CAPTURE_AUDIO_ENABLED:-false}"
       CAPTURE_CAMERA_ID: "${CAPTURE_CAMERA_ID:-garage-01}"
-      CAPTURE_SPOOL_DIRECTORY: /data/capture
+      CAPTURE_SPOOL_DIRECTORY: /capture-data
       CAPTURE_SEGMENT_SECONDS: "${CAPTURE_SEGMENT_SECONDS:-5}"
       CAPTURE_SEGMENT_TIMEOUT_SECONDS: "${CAPTURE_SEGMENT_TIMEOUT_SECONDS:-0}"
       CAPTURE_MAX_SEGMENTS: "${CAPTURE_MAX_SEGMENTS:-120}"
@@ -45,6 +49,26 @@ services:
       CLIP_ANALYSIS_QUEUE_CAPACITY: "${CLIP_ANALYSIS_QUEUE_CAPACITY:-8}"
       CLIP_ANALYSIS_LEASE_SECONDS: "${CLIP_ANALYSIS_LEASE_SECONDS:-60}"
       CLIP_ANALYSIS_DEFAULT_VERSION: "${CLIP_ANALYSIS_DEFAULT_VERSION:-analysis-v1}"
+      DETECTOR_ONNX_MODEL_PATH: "${DETECTOR_ONNX_MODEL_PATH:-}"
+      DETECTOR_MODEL_VERSION: "${DETECTOR_MODEL_VERSION:-unconfigured}"
+      DETECTOR_ONNX_INPUT_NAME: "${DETECTOR_ONNX_INPUT_NAME:-images}"
+      DETECTOR_ONNX_OUTPUT_NAME: "${DETECTOR_ONNX_OUTPUT_NAME:-detections}"
+      DETECTOR_INPUT_WIDTH: "${DETECTOR_INPUT_WIDTH:-640}"
+      DETECTOR_INPUT_HEIGHT: "${DETECTOR_INPUT_HEIGHT:-640}"
+      DETECTOR_SCORE_THRESHOLD: "${DETECTOR_SCORE_THRESHOLD:-0.25}"
+      DETECTOR_LABELS: "${DETECTOR_LABELS:-person}"
+      DETECTOR_QUEUE_CAPACITY: "${DETECTOR_QUEUE_CAPACITY:-8}"
+      DETECTOR_INTRA_OP_THREADS: "${DETECTOR_INTRA_OP_THREADS:-1}"
+      DETECTOR_INTER_OP_THREADS: "${DETECTOR_INTER_OP_THREADS:-1}"
+      DETECTOR_SAMPLE_EVERY_SEGMENTS: "${DETECTOR_SAMPLE_EVERY_SEGMENTS:-1}"
+      EVENT_RULES_FILE: "${EVENT_RULES_FILE:-}"
+      EVENT_JOURNAL_MAX_EVENTS: "${EVENT_JOURNAL_MAX_EVENTS:-10000}"
+      EVENT_JOURNAL_MAX_BYTES: "${EVENT_JOURNAL_MAX_BYTES:-67108864}"
+      CLIP_ARCHIVE_DIRECTORY: /archive-data
+      CLIP_ARCHIVE_POLL_SECONDS: "${CLIP_ARCHIVE_POLL_SECONDS:-2}"
+      CLIP_ARCHIVE_MAX_CLIPS: "${CLIP_ARCHIVE_MAX_CLIPS:-10000}"
+      CLIP_ARCHIVE_MAX_BYTES: "${CLIP_ARCHIVE_MAX_BYTES:-53687091200}"
+      CLIP_ARCHIVE_MAX_CLIP_BYTES: "${CLIP_ARCHIVE_MAX_CLIP_BYTES:-1073741824}"
       CAPTURE_RTSP_URL: "${CAPTURE_RTSP_URL:-}"
       CAPTURE_FFMPEG_PATH: "${CAPTURE_FFMPEG_PATH:-ffmpeg}"
       CAPTURE_FFPROBE_PATH: "${CAPTURE_FFPROBE_PATH:-ffprobe}"
@@ -55,7 +79,7 @@ services:
     ports:
       - "127.0.0.1:${APP_PORT:-8081}:8080"
     tmpfs:
-      - /tmp:size=512m,mode=1777
+      - /tmp:size=1g,mode=1777
     security_opt:
       - no-new-privileges:true
     cap_drop:
@@ -78,6 +102,8 @@ services:
         APP_UID: "${APP_UID:-1000}"
         APP_GID: "${APP_GID:-1000}"
     profiles: [test]
+    cpus: "${PLATFORM_TEST_CPUS:-2.0}"
+    mem_limit: "${PLATFORM_TEST_MEMORY_LIMIT:-3g}"
     init: true
     user: "${APP_UID:-1000}:${APP_GID:-1000}"
     working_dir: /workspace
@@ -98,7 +124,7 @@ services:
       CAPTURE_MAX_SEGMENT_BYTES: "1048576"
       CLIP_TRIGGER_ENABLED: "false"
     tmpfs:
-      - /tmp:size=512m,mode=1777
+      - /tmp:size=1g,mode=1777
     security_opt:
       - no-new-privileges:true
     cap_drop:
@@ -218,6 +244,8 @@ services:
   web-dev:
     image: node:24.22.2-bookworm-slim@sha256:c86ecead9e55a5210ac1727de38a4ca840bf03dcaf34dc9749addbf383b1920c
     profiles: [web-dev]
+    cpus: "${PLATFORM_WEB_CPUS:-1.0}"
+    mem_limit: "${PLATFORM_WEB_MEMORY_LIMIT:-1g}"
     init: true
     working_dir: /web
     volumes:
