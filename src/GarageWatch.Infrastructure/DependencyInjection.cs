@@ -54,6 +54,7 @@ public static class DependencyInjection
         services.AddScoped<IdentityAdministrationService>();
         services.AddScoped<AccessProfileService>();
         services.AddScoped<AccessRequestService>();
+        services.AddScoped<ClipAnalysisDispatchService>();
         services.AddScoped<ICameraCatalog, CameraCatalogService>();
         services.AddScoped<ICameraResourceAccess, CameraResourceAccessService>();
         services.AddSingleton<IPermissionEvaluator, PermissionEvaluator>();
@@ -65,14 +66,17 @@ public static class DependencyInjection
             provider.GetRequiredService<IConfiguration>()));
         var captureOptions = CaptureOptions.FromEnvironment(configuration);
         var triggerOptions = ClipTriggerOptions.FromEnvironment(configuration);
+        var clipAnalysisOptions = ClipAnalysisDispatchOptions.FromConfiguration(configuration);
         services.AddSingleton(captureOptions);
         services.AddSingleton(triggerOptions);
+        services.AddSingleton(clipAnalysisOptions);
         services.AddSingleton<LocalSegmentSpool>();
         services.AddSingleton<ISegmentCaptureAdapter>(captureOptions.Profile == "synthetic"
             ? new SyntheticSegmentCaptureAdapter(captureOptions)
             : new FfmpegRtspCaptureAdapter(captureOptions));
         services.AddSingleton<IVisualChangeDetector, FfmpegVisualChangeDetector>();
         services.AddSingleton<IClipMediaAssembler, LocalClipMediaAssembler>();
+        services.AddSingleton<IClipAnalysisAutoDispatcher, ClipAnalysisAutoDispatcher>();
         services.AddSingleton<ClipTriggerWorker>();
         services.AddSingleton<CaptureWorker>();
         services.AddSingleton<IHostedService>(provider => provider.GetRequiredService<ClipTriggerWorker>());

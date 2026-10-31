@@ -300,6 +300,112 @@ namespace GarageWatch.Infrastructure.Identity.Migrations
                     b.ToTable("CameraContexts");
                 });
 
+            modelBuilder.Entity("GarageWatch.Infrastructure.Identity.ClipAnalysisDispatchPolicy", b =>
+                {
+                    b.Property<string>("CameraId")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ContextId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("CreatedAtUtc")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Policy")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("UpdatedAtUtc")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("UpdatedByUserId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("CameraId");
+
+                    b.ToTable("ClipAnalysisDispatchPolicies");
+                });
+
+            modelBuilder.Entity("GarageWatch.Infrastructure.Identity.ClipAnalysisJob", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("AnalysisVersion")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("AttemptCount")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("CameraId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ClipId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ContextId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("CreatedAtUtc")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid>("IdempotencyKey")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long?>("LeaseExpiresAtUtc")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid?>("LeaseId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("PolicyVersion")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("RequestKind")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("State")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("UpdatedAtUtc")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ClipId", "AnalysisVersion")
+                        .IsUnique();
+
+                    b.HasIndex("ClipId", "IdempotencyKey")
+                        .IsUnique();
+
+                    b.HasIndex("State", "CreatedAtUtc");
+
+                    b.ToTable("ClipAnalysisJobs");
+                });
+
             modelBuilder.Entity("GarageWatch.Infrastructure.Identity.IamAuditEvent", b =>
                 {
                     b.Property<Guid>("Id")
@@ -576,6 +682,15 @@ namespace GarageWatch.Infrastructure.Identity.Migrations
                         .IsRequired();
 
                     b.Navigation("Context");
+                });
+
+            modelBuilder.Entity("GarageWatch.Infrastructure.Identity.ClipAnalysisDispatchPolicy", b =>
+                {
+                    b.HasOne("GarageWatch.Infrastructure.Identity.CameraCatalogEntry", null)
+                        .WithMany()
+                        .HasForeignKey("CameraId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("GarageWatch.Infrastructure.Identity.IamAuditEvent", b =>

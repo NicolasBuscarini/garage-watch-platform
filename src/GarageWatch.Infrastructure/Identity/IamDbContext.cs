@@ -26,6 +26,8 @@ public sealed class IamDbContext(DbContextOptions<IamDbContext> options)
     public DbSet<UserAccessProfileScope> UserAccessProfileScopes => Set<UserAccessProfileScope>();
     public DbSet<IamMigrationState> IamMigrationStates => Set<IamMigrationState>();
     public DbSet<AccessRequest> AccessRequests => Set<AccessRequest>();
+    public DbSet<ClipAnalysisDispatchPolicy> ClipAnalysisDispatchPolicies => Set<ClipAnalysisDispatchPolicy>();
+    public DbSet<ClipAnalysisJob> ClipAnalysisJobs => Set<ClipAnalysisJob>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -149,6 +151,35 @@ public sealed class IamDbContext(DbContextOptions<IamDbContext> options)
             entity.HasIndex(request => new { request.Status, request.CreatedAtUtc });
             entity.HasOne(request => request.User).WithMany().HasForeignKey(request => request.UserId)
                 .OnDelete(DeleteBehavior.Restrict);
+        });
+        builder.Entity<ClipAnalysisDispatchPolicy>(entity =>
+        {
+            entity.HasKey(policy => policy.CameraId);
+            entity.Property(policy => policy.CameraId).HasMaxLength(64).IsRequired();
+            entity.Property(policy => policy.ContextId).HasMaxLength(64).IsRequired();
+            entity.Property(policy => policy.Policy).HasMaxLength(32).IsRequired();
+            entity.Property(policy => policy.UpdatedByUserId).HasMaxLength(64).IsRequired();
+            entity.Property(policy => policy.Version).IsConcurrencyToken();
+            entity.Property(policy => policy.CreatedAtUtc).HasConversion(UtcTicksConverter);
+            entity.Property(policy => policy.UpdatedAtUtc).HasConversion(UtcTicksConverter);
+            entity.HasOne<CameraCatalogEntry>().WithMany().HasForeignKey(policy => policy.CameraId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+        builder.Entity<ClipAnalysisJob>(entity =>
+        {
+            entity.HasKey(job => job.Id);
+            entity.Property(job => job.ClipId).HasMaxLength(64).IsRequired();
+            entity.Property(job => job.ContextId).HasMaxLength(64).IsRequired();
+            entity.Property(job => job.CameraId).HasMaxLength(64).IsRequired();
+            entity.Property(job => job.AnalysisVersion).HasMaxLength(64).IsRequired();
+            entity.Property(job => job.State).HasMaxLength(32).IsRequired();
+            entity.Property(job => job.RequestKind).HasMaxLength(32).IsRequired();
+            entity.Property(job => job.LeaseExpiresAtUtc).HasConversion(NullableUtcTicksConverter);
+            entity.Property(job => job.CreatedAtUtc).HasConversion(UtcTicksConverter);
+            entity.Property(job => job.UpdatedAtUtc).HasConversion(UtcTicksConverter);
+            entity.HasIndex(job => new { job.ClipId, job.AnalysisVersion }).IsUnique();
+            entity.HasIndex(job => new { job.ClipId, job.IdempotencyKey }).IsUnique();
+            entity.HasIndex(job => new { job.State, job.CreatedAtUtc });
         });
     }
 }

@@ -19,6 +19,7 @@ public sealed class ApiFactory : WebApplicationFactory<Program>
     private readonly ILoggerProvider? _loggerProvider;
     private readonly ISegmentCaptureAdapter? _captureAdapter;
     private readonly string _databasePath;
+    private readonly string _captureSpoolPath;
     private readonly string? _bootstrapUsername;
     private readonly string? _bootstrapPassword;
     private readonly string _environment;
@@ -33,6 +34,7 @@ public sealed class ApiFactory : WebApplicationFactory<Program>
         _captureAdapter = captureAdapter;
         Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), "garagewatch-tests"));
         _databasePath = databasePath ?? Path.Combine(Path.GetTempPath(), "garagewatch-tests", $"{Guid.NewGuid():N}.db");
+        _captureSpoolPath = Path.Combine(Path.GetTempPath(), "garagewatch-tests", $"capture-{Guid.NewGuid():N}");
         _bootstrapUsername = bootstrapUsername;
         _bootstrapPassword = bootstrapPassword;
         _environment = environment;
@@ -49,7 +51,8 @@ public sealed class ApiFactory : WebApplicationFactory<Program>
             ["AUTH_USERNAME"] = _bootstrapUsername,
             ["AUTH_PASSWORD"] = _bootstrapPassword,
             ["AUTH_EMAIL"] = "contract-admin@example.invalid",
-            ["IDENTITY_DB_PATH"] = _databasePath
+            ["IDENTITY_DB_PATH"] = _databasePath,
+            ["CAPTURE_SPOOL_DIRECTORY"] = _captureSpoolPath
         }));
         if (_loggerProvider is not null)
         {

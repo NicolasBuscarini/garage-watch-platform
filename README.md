@@ -29,7 +29,7 @@ T03-ACCESS-REQ permite que um `User` sem monitoramento envie um pedido categoriz
 
 ## API modular e documentação
 
-As 28 operações HTTP seguem Minimal APIs, cada uma em arquivo/classe própria, com registro explícito e convenções comuns em `BaseEndpoint`; não há MVC controllers. Em Development/Testing, após login de Administrator, Swagger UI está em `/docs` e OpenAPI 3 JSON em `/openapi/v1.json`, na mesma origem/porta da API. Ambas as rotas são desabilitadas em Production e exigem Administrator; consulte [`docs/api.md`](docs/api.md) para tags de domínio, tipos e restrições.
+As 34 operações HTTP seguem Minimal APIs, cada uma em arquivo/classe própria, com registro explícito e convenções comuns em `BaseEndpoint`; não há MVC controllers. Em Development/Testing, após login de Administrator, Swagger UI está em `/docs` e OpenAPI 3 JSON em `/openapi/v1.json`, na mesma origem/porta da API. Ambas as rotas são desabilitadas em Production e exigem Administrator; consulte [`docs/api.md`](docs/api.md) para tags de domínio, tipos e restrições.
 
 ## Frontend React independente
 

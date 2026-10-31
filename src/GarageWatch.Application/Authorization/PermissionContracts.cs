@@ -14,6 +14,8 @@ public static class PermissionCatalog
             ["events.read"] = new("events.read", "Read events", true),
             ["clips.read"] = new("clips.read", "Read clips", true),
             ["clips.export"] = new("clips.export", "Export clips", true),
+            ["clips.analysis.request"] = new("clips.analysis.request", "Request clip analysis", true),
+            ["clips.analysis.policy.manage"] = new("clips.analysis.policy.manage", "Manage clip analysis dispatch policy", true),
             ["admin.users.manage"] = new("admin.users.manage", "Manage accounts and access", false),
             ["admin.permissions.manage"] = new("admin.permissions.manage", "Manage permission profiles", false),
             ["admin.configuration.manage"] = new("admin.configuration.manage", "Manage privileged configuration", false),

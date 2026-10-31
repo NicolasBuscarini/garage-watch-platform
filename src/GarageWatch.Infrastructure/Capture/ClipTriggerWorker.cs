@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Diagnostics.Metrics;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using GarageWatch.Infrastructure.Identity;
 
 namespace GarageWatch.Infrastructure.Capture;
 
@@ -18,7 +19,8 @@ public sealed class ClipTriggerWorker : BackgroundService
     private DateTimeOffset lastTriggerAt = DateTimeOffset.MinValue;
 
     public ClipTriggerWorker(CaptureOptions capture, ClipTriggerOptions options, LocalSegmentSpool spool,
-        IVisualChangeDetector detector, IClipMediaAssembler assembler, ILogger<ClipTriggerWorker> logger)
+        IVisualChangeDetector detector, IClipMediaAssembler assembler, ILogger<ClipTriggerWorker> logger,
+        IClipAnalysisAutoDispatcher? analysisDispatcher = null)
     {
         Capture = capture;
         Options = options;
@@ -26,6 +28,7 @@ public sealed class ClipTriggerWorker : BackgroundService
         Detector = detector;
         Assembler = assembler;
         Logger = logger;
+        AnalysisDispatcher = analysisDispatcher;
         queue = Channel.CreateBounded<SegmentManifestV1>(new BoundedChannelOptions(options.QueueCapacity)
         {
             FullMode = BoundedChannelFullMode.DropWrite,
@@ -40,6 +43,7 @@ public sealed class ClipTriggerWorker : BackgroundService
     private IVisualChangeDetector Detector { get; }
     private IClipMediaAssembler Assembler { get; }
     private ILogger<ClipTriggerWorker> Logger { get; }
+    private IClipAnalysisAutoDispatcher? AnalysisDispatcher { get; }
 
     public bool TryEnqueue(SegmentManifestV1 segment)
     {
@@ -136,7 +140,7 @@ public sealed class ClipTriggerWorker : BackgroundService
                 .OrderBy(item => item.Manifest.StartedAt).Select(item => item.Path).ToArray();
             if (paths.Length != clip.SegmentIds.Count) throw new InvalidDataException("clip_segments_unavailable");
             var media = await Assembler.AssembleAsync(clip, paths, cancellationToken);
-            await PersistAsync(clip with
+            var ready = clip with
             {
                 State = "ready",
                 MediaFileName = media.MediaFileName,
@@ -145,8 +149,19 @@ public sealed class ClipTriggerWorker : BackgroundService
                 ThumbnailSha256 = media.ThumbnailSha256,
                 AttemptCount = clip.AttemptCount + 1,
                 UpdatedAt = DateTimeOffset.UtcNow
-            }, cancellationToken);
+            };
+            await PersistAsync(ready, cancellationToken);
             Clips.Add(1, new TagList { { "state", "ready" } });
+            if (AnalysisDispatcher is not null)
+            {
+                try { await AnalysisDispatcher.DispatchAsync(ready, cancellationToken); }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+                catch (Exception exception)
+                {
+                    Logger.LogWarning("Despacho automático de análise indisponível; motivo={FailureType}",
+                        exception.GetType().Name);
+                }
+            }
         }
         catch (Exception exception) when (exception is IOException or InvalidDataException)
         {
