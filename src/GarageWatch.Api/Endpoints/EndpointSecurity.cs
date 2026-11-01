@@ -8,15 +8,23 @@ internal static class EndpointSecurity
     {
         var origin = context.Request.Headers["Origin"].ToString();
         if (!Uri.TryCreate(origin, UriKind.Absolute, out var suppliedOrigin) ||
+            (suppliedOrigin.Scheme != Uri.UriSchemeHttp && suppliedOrigin.Scheme != Uri.UriSchemeHttps) ||
             !string.IsNullOrEmpty(suppliedOrigin.UserInfo) || suppliedOrigin.AbsolutePath != "/" ||
             !string.IsNullOrEmpty(suppliedOrigin.Query) || !string.IsNullOrEmpty(suppliedOrigin.Fragment))
             return false;
 
-        var requestOriginText = $"{context.Request.Scheme}://{context.Request.Host}";
-        return Uri.TryCreate(requestOriginText, UriKind.Absolute, out var requestOrigin) &&
-            suppliedOrigin.IsLoopback && requestOrigin.IsLoopback &&
-            string.Equals(suppliedOrigin.GetLeftPart(UriPartial.Authority),
-                requestOrigin.GetLeftPart(UriPartial.Authority), StringComparison.OrdinalIgnoreCase);
+        var requestHost = context.Request.Host.Value;
+        if (string.IsNullOrWhiteSpace(requestHost) ||
+            !string.Equals(suppliedOrigin.Authority, requestHost, StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        // Local direct access must match scheme as well. For a TLS-terminating tunnel, the
+        // upstream request can be HTTP while the browser Origin is HTTPS; exact authority
+        // matching still prevents cross-origin browser writes without trusting forwarded headers.
+        if (suppliedOrigin.IsLoopback)
+            return string.Equals(suppliedOrigin.Scheme, context.Request.Scheme, StringComparison.OrdinalIgnoreCase);
+
+        return suppliedOrigin.Scheme == Uri.UriSchemeHttps;
     }
 
     public static IResult CatalogError(Exception exception) => exception switch

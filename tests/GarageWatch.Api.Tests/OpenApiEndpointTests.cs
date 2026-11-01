@@ -41,7 +41,7 @@ public sealed class OpenApiEndpointTests
 
         var operations = json.RootElement.GetProperty("paths").EnumerateObject()
             .SelectMany(path => path.Value.EnumerateObject().Select(method => method.Value)).ToArray();
-        Assert.Equal(41, operations.Length);
+        Assert.Equal(55, operations.Length);
         var operationIds = operations.Select(operation => operation.GetProperty("operationId").GetString()).ToArray();
         Assert.Equal(operationIds.Length, operationIds.Distinct(StringComparer.Ordinal).Count());
         Assert.All(operations, operation =>
@@ -56,7 +56,7 @@ public sealed class OpenApiEndpointTests
         });
 
         var requestBodies = operations.Where(operation => operation.TryGetProperty("requestBody", out _)).ToArray();
-        Assert.Equal(14, requestBodies.Length);
+        Assert.Equal(21, requestBodies.Length);
         Assert.All(requestBodies, operation =>
         {
             var body = operation.GetProperty("requestBody");
@@ -74,6 +74,15 @@ public sealed class OpenApiEndpointTests
         Assert.Contains(operations, operation => operation.GetProperty("operationId").GetString() == "UpdateClipTriggerConfiguration" &&
             operation.GetProperty("requestBody").GetProperty("content").TryGetProperty("application/json", out _));
         Assert.Contains(operations, operation => operation.GetProperty("operationId").GetString() == "GetClipAnalysisDispatchPolicy");
+        Assert.Contains(operations, operation => operation.GetProperty("operationId").GetString() == "AdminListKnownPeople");
+        Assert.Contains(operations, operation => operation.GetProperty("operationId").GetString() == "AdminCreateKnownPerson");
+        Assert.Contains(operations, operation => operation.GetProperty("operationId").GetString() == "AdminRemoveKnownPerson");
+        Assert.Contains(operations, operation => operation.GetProperty("operationId").GetString() == "AdminGetFaceExtractorRegistry");
+        Assert.Contains(operations, operation => operation.GetProperty("operationId").GetString() == "AdminCreateFaceExtractorCandidate");
+        Assert.Contains(operations, operation => operation.GetProperty("operationId").GetString() == "AdminSelectFaceExtractor");
+        Assert.Contains(operations, operation => operation.GetProperty("operationId").GetString() == "GetCameraConnection");
+        Assert.Contains(operations, operation => operation.GetProperty("operationId").GetString() == "UpdateCameraConnection" &&
+            operation.GetProperty("requestBody").GetProperty("content").TryGetProperty("application/json", out _));
         Assert.Contains(operations, operation => operation.GetProperty("operationId").GetString() == "GetSystemProfile" &&
             operation.TryGetProperty("security", out _));
         Assert.Contains(operations, operation => operation.GetProperty("operationId").GetString() == "GetSession" &&

@@ -190,7 +190,13 @@ public sealed class ClipArchiveTests
 
     private static ClipArchiveWorker CreateWorker(CaptureOptions capture, ClipArchiveOptions options) =>
         new(capture, options, new LocalFilesystemClipArchiveAdapter(options),
-            NullLogger<ClipArchiveWorker>.Instance);
+            new CapacityManagerAlwaysAvailable(), NullLogger<ClipArchiveWorker>.Instance);
+
+    private sealed class CapacityManagerAlwaysAvailable : IClipArchiveCapacityManager
+    {
+        public Task<bool> EnsureCapacityAsync(string cameraId, long incomingBytes,
+            CancellationToken cancellationToken) => Task.FromResult(true);
+    }
 
     private static ClipArchiveOptions Options(string destination) => new(destination, 1, 10, 10_000_000, 2_000_000);
 

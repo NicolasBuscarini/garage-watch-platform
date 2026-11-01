@@ -85,6 +85,43 @@ public sealed class ClipAnalysisDispatchApiTests
     }
 
     [Fact]
+    public async Task Clip_trigger_accepts_exact_https_origin_through_tls_terminating_tunnel_without_forwarded_headers()
+    {
+        await using var factory = new ApiFactory();
+        var cameraPublicId = await GetCameraPublicIdAsync(factory);
+        using var admin = await LoginAsync(factory, "contract-user", "Contract-Password-123!");
+
+        using var wrongHost = await SendTunnelTriggerUpdateAsync(admin, cameraPublicId,
+            "https://attacker.example", "home-ia.nklas.loan");
+        Assert.Equal(HttpStatusCode.Forbidden, wrongHost.StatusCode);
+        using var insecureOrigin = await SendTunnelTriggerUpdateAsync(admin, cameraPublicId,
+            "http://home-ia.nklas.loan", "home-ia.nklas.loan");
+        Assert.Equal(HttpStatusCode.Forbidden, insecureOrigin.StatusCode);
+        using var wrongPort = await SendTunnelTriggerUpdateAsync(admin, cameraPublicId,
+            "https://home-ia.nklas.loan:8443", "home-ia.nklas.loan");
+        Assert.Equal(HttpStatusCode.Forbidden, wrongPort.StatusCode);
+
+        using var accepted = await SendTunnelTriggerUpdateAsync(admin, cameraPublicId,
+            "https://home-ia.nklas.loan", "home-ia.nklas.loan");
+        Assert.Equal(HttpStatusCode.OK, accepted.StatusCode);
+        var body = await accepted.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.True(body.GetProperty("enabled").GetBoolean());
+        Assert.Equal(1, body.GetProperty("version").GetInt64());
+    }
+
+    private static async Task<HttpResponseMessage> SendTunnelTriggerUpdateAsync(HttpClient client, string cameraId,
+        string origin, string host)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Put, $"/api/v1/admin/cameras/{cameraId}/clip-trigger")
+        {
+            Content = JsonContent.Create(new { expectedVersion = 0, enabled = true })
+        };
+        request.Headers.Host = host;
+        request.Headers.TryAddWithoutValidation("Origin", origin);
+        return await client.SendAsync(request);
+    }
+
+    [Fact]
     public async Task Authorized_manual_request_is_deduplicated_and_never_rejects_even_administrator()
     {
         await using var factory = new ApiFactory();
@@ -212,6 +249,87 @@ public sealed class ClipAnalysisDispatchApiTests
 
         await dispatch.AutoRequestAsync(clip, CancellationToken.None);
         Assert.Equal(1, await database.ClipAnalysisJobs.CountAsync());
+    }
+
+    [Fact]
+    public async Task Known_person_registry_requires_admin_and_authorization_and_removal_erases_roster_fields()
+    {
+        await using var factory = new ApiFactory();
+        using (var anonymous = factory.CreateClient())
+        {
+            using var denied = await anonymous.GetAsync("/api/v1/admin/known-people");
+            Assert.Equal(HttpStatusCode.Unauthorized, denied.StatusCode);
+        }
+
+        var user = new ApplicationUser { Id = Guid.NewGuid(), UserName = "known-person-user", IsActive = true };
+        using (var scope = factory.Services.CreateScope())
+        {
+            var users = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
+            Assert.True((await users.CreateAsync(user, "Known-Person-Password-123!")).Succeeded);
+            Assert.True((await users.AddToRoleAsync(user, "User")).Succeeded);
+        }
+        using (var nonAdmin = await LoginAsync(factory, "known-person-user", "Known-Person-Password-123!"))
+        {
+            nonAdmin.DefaultRequestHeaders.Add("Origin", "http://localhost");
+            using var denied = await nonAdmin.GetAsync("/api/v1/admin/known-people");
+            Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
+            using var deniedCreate = await nonAdmin.PostAsJsonAsync("/api/v1/admin/known-people",
+                new { displayName = "Unauthorized Person", purpose = "test", authorizationConfirmed = true });
+            Assert.Equal(HttpStatusCode.Forbidden, deniedCreate.StatusCode);
+        }
+
+        using var admin = await LoginAsync(factory, "contract-user", "Contract-Password-123!");
+        using var missingOrigin = await admin.PostAsJsonAsync("/api/v1/admin/known-people",
+            new { displayName = "Origin Test Person", purpose = "test", authorizationConfirmed = true });
+        Assert.Equal(HttpStatusCode.Forbidden, missingOrigin.StatusCode);
+        admin.DefaultRequestHeaders.Add("Origin", "http://localhost");
+        using var missingAuthorization = await admin.PostAsJsonAsync("/api/v1/admin/known-people",
+            new { displayName = "Authorized Test Person", purpose = "Household recognition", authorizationConfirmed = false });
+        Assert.Equal(HttpStatusCode.BadRequest, missingAuthorization.StatusCode);
+
+        using var created = await admin.PostAsJsonAsync("/api/v1/admin/known-people",
+            new { displayName = "Authorized Test Person", purpose = "Household recognition", authorizationConfirmed = true });
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+        var person = await created.Content.ReadFromJsonAsync<JsonElement>();
+        var personPublicId = person.GetProperty("publicId").GetString()!;
+        Assert.Matches("^PER[0-9]{12}$", personPublicId);
+        Assert.Equal("Household recognition", person.GetProperty("purpose").GetString());
+        Assert.NotEqual(default, person.GetProperty("authorizationRecordedAtUtc").GetDateTimeOffset());
+
+        using var listed = await admin.GetAsync("/api/v1/admin/known-people");
+        Assert.Equal(HttpStatusCode.OK, listed.StatusCode);
+        var list = await listed.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(personPublicId, list.GetProperty("items")[0].GetProperty("publicId").GetString());
+
+        using var removed = await admin.DeleteAsync($"/api/v1/admin/known-people/{personPublicId}");
+        Assert.Equal(HttpStatusCode.NoContent, removed.StatusCode);
+        using var repeatedRemoval = await admin.DeleteAsync($"/api/v1/admin/known-people/{personPublicId}");
+        Assert.Equal(HttpStatusCode.NoContent, repeatedRemoval.StatusCode);
+        using var listedAfterRemoval = await admin.GetAsync("/api/v1/admin/known-people");
+        var emptyList = await listedAfterRemoval.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Empty(emptyList.GetProperty("items").EnumerateArray());
+        using (var dataScope = factory.Services.CreateScope())
+        {
+            var database = dataScope.ServiceProvider.GetRequiredService<IamDbContext>();
+            var tombstone = await database.KnownPeople.SingleAsync(item => item.PublicId == personPublicId);
+            Assert.Null(tombstone.DisplayName);
+            Assert.Null(tombstone.Purpose);
+            Assert.Null(tombstone.AuthorizationRecordedAtUtc);
+            Assert.NotNull(tombstone.DeletedAtUtc);
+            Assert.Contains(await database.IamAuditEvents.Where(item => item.Action == "known_person.removed")
+                .Select(item => item.ResourceId).ToArrayAsync(), id => id == personPublicId);
+            var creationAudit = await database.IamAuditEvents.SingleAsync(item => item.Action == "known_person.created");
+            Assert.Equal(personPublicId, creationAudit.ResourceId);
+            Assert.DoesNotContain("Authorized Test Person", creationAudit.ResourceId, StringComparison.Ordinal);
+        }
+
+        var databasePath = factory.DatabasePath;
+        await factory.DisposeAsync();
+        await using var restartedFactory = new ApiFactory(databasePath: databasePath);
+        using var restartedAdmin = await LoginAsync(restartedFactory, "contract-user", "Contract-Password-123!");
+        using var afterRestart = await restartedAdmin.GetAsync("/api/v1/admin/known-people");
+        var afterRestartList = await afterRestart.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Empty(afterRestartList.GetProperty("items").EnumerateArray());
     }
 
     [Fact]

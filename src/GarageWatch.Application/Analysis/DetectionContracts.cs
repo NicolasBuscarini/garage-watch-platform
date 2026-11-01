@@ -41,4 +41,34 @@ public interface IObjectTracker
     void Reset(string cameraId, string streamEpoch);
 }
 
+/// <summary>Versioned, model-neutral boundary for a face crop already selected by an authorized local workflow.</summary>
+public sealed record FaceCropV1(string MediaType, int Width, int Height, ReadOnlyMemory<byte> EncodedImage)
+{
+    public const string SchemaVersion = "face-crop.v1";
+    public const int MaximumEncodedBytes = 2 * 1024 * 1024;
+
+    public bool IsValid => (MediaType is "image/jpeg" or "image/png") &&
+        Width is > 0 and <= 2048 && Height is > 0 and <= 2048 &&
+        !EncodedImage.IsEmpty && EncodedImage.Length <= MaximumEncodedBytes;
+}
+
+/// <summary>Transient embedding result. Callers must not persist it until biometric storage policy is approved.</summary>
+public sealed record FaceEmbeddingV1(string SchemaVersion, string ModelId, string ModelVersion,
+    int Dimensions, IReadOnlyList<float> Values)
+{
+    public const string CurrentSchemaVersion = "face-embedding.v1";
+
+    public bool IsValid => SchemaVersion == CurrentSchemaVersion && !string.IsNullOrWhiteSpace(ModelId) &&
+        !string.IsNullOrWhiteSpace(ModelVersion) && Dimensions is > 0 and <= 4096 &&
+        Values is not null && Values.Count == Dimensions &&
+        Values.All(float.IsFinite);
+}
+
+public interface IFaceEmbeddingExtractor
+{
+    string ModelId { get; }
+    string ModelVersion { get; }
+    ValueTask<FaceEmbeddingV1> ExtractAsync(FaceCropV1 crop, CancellationToken cancellationToken);
+}
+
 public sealed record TrackedObject(string TrackId, string ClassName, int ClassId, float Score, DetectionBox Box);

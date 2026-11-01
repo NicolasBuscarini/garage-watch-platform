@@ -6,7 +6,8 @@ using Microsoft.Extensions.Logging;
 namespace GarageWatch.Infrastructure.Capture;
 
 public sealed class ClipArchiveWorker(CaptureOptions capture, ClipArchiveOptions options,
-    IClipArchiveAdapter adapter, ILogger<ClipArchiveWorker> logger) : BackgroundService
+    IClipArchiveAdapter adapter, IClipArchiveCapacityManager capacityManager,
+    ILogger<ClipArchiveWorker> logger) : BackgroundService
 {
     private const int MaximumAttempts = 8;
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
@@ -32,6 +33,13 @@ public sealed class ClipArchiveWorker(CaptureOptions capture, ClipArchiveOptions
                 logger.LogWarning("Varredura de arquivamento falhou; motivo={FailureType}", exception.GetType().Name);
             }
         } while (await timer.WaitForNextTickAsync(stoppingToken));
+    }
+
+    public Task RunOnceAsync(CancellationToken cancellationToken)
+    {
+        var manifestDirectory = Path.Combine(capture.SpoolDirectory, "clips", "manifests");
+        Directory.CreateDirectory(manifestDirectory);
+        return ProcessReadyClipsAsync(manifestDirectory, cancellationToken);
     }
 
     private async Task RecoverInterruptedAsync(string manifestDirectory, CancellationToken cancellationToken)
@@ -60,7 +68,7 @@ public sealed class ClipArchiveWorker(CaptureOptions capture, ClipArchiveOptions
             if (clip is null || clip.SchemaVersion != "1.0" || clip.State != "ready"
                 || !LocalSegmentSpool.IsSafeSegmentId(clip.ClipId)
                 || Path.GetFileNameWithoutExtension(path) != clip.ClipId) continue;
-            if (clip.ArchiveStatus is "archived" or "failed") continue;
+            if (clip.ArchiveStatus is "archived" or "expiring" or "expired" or "failed") continue;
             if (clip.ArchiveNextAttemptAt is { } next && next > DateTimeOffset.UtcNow) continue;
 
             if (clip.ArchiveStatus is not ("pending" or "retry_wait" or "copying" or "verifying"))
@@ -80,6 +88,20 @@ public sealed class ClipArchiveWorker(CaptureOptions capture, ClipArchiveOptions
         var thumbnailPath = Path.Combine(capture.SpoolDirectory, "clips", "thumbnails", clip.ThumbnailFileName ?? string.Empty);
         try
         {
+            var incomingBytes = File.Exists(mediaPath) && File.Exists(thumbnailPath)
+                ? checked(new FileInfo(mediaPath).Length + new FileInfo(thumbnailPath).Length)
+                : 0;
+            if (!await capacityManager.EnsureCapacityAsync(clip.CameraId, incomingBytes, cancellationToken))
+            {
+                await PersistAsync(manifestPath, clip with
+                {
+                    ArchiveStatus = "retry_wait",
+                    ArchiveNextAttemptAt = startedAt.AddSeconds(options.PollSeconds),
+                    UpdatedAt = startedAt
+                }, cancellationToken);
+                logger.LogWarning("Arquivamento aguardando capacidade por câmera; clip={ClipId}", clip.ClipId);
+                return;
+            }
             await PersistAsync(manifestPath, clip with
             {
                 ArchiveStatus = "copying",

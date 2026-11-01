@@ -22,7 +22,8 @@ public sealed class GetClipEndpoint() : BaseEndpoint("Clips", "GetClip", "Get au
             var item = detail.Clip;
             return Results.Ok(new ClipDetailsResponse(new ClipListItemResponse(item.PublicId, item.CameraId,
                 item.StartedAtUtc, item.EndedAtUtc, item.State, item.ArchiveStatus, item.AnalysisStatus,
-                item.ThumbnailUrl, item.SizeBytes, item.TriggerReason, item.TriggerConfigVersion), detail.MediaUrl,
+                item.ThumbnailUrl, item.SizeBytes, item.TriggerReason, item.TriggerConfigVersion,
+                item.IsPreserved, item.PreservationVersion), detail.MediaUrl,
                 detail.MediaSha256, detail.ThumbnailSha256, detail.AttemptCount, detail.UpdatedAtUtc));
         }).RequireAuthorization().Produces<ClipDetailsResponse>(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status401Unauthorized).Produces(StatusCodes.Status403Forbidden)

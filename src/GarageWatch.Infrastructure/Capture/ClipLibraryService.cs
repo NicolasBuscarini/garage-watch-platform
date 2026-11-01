@@ -8,7 +8,8 @@ namespace GarageWatch.Infrastructure.Capture;
 
 public sealed record ClipListItem(string PublicId, string CameraId, DateTimeOffset StartedAtUtc,
     DateTimeOffset EndedAtUtc, string State, string ArchiveStatus, string AnalysisStatus, string? ThumbnailUrl,
-    long? SizeBytes, string? TriggerReason, string? TriggerConfigVersion);
+    long? SizeBytes, string? TriggerReason, string? TriggerConfigVersion, bool IsPreserved,
+    long PreservationVersion);
 public sealed record ClipPage(IReadOnlyList<ClipListItem> Items, int Page, int PageSize, int Total);
 public sealed record ClipDetails(ClipListItem Clip, string? MediaUrl, string? MediaSha256,
     string? ThumbnailSha256, int AttemptCount,
@@ -60,6 +61,9 @@ public sealed class ClipLibraryService(CaptureOptions capture, IamDbContext data
             clips.Add(clip);
         }
         var ids = clips.Select(clip => clip.ClipId).ToArray();
+        var preservationStates = await database.ClipPreservations.AsNoTracking()
+            .Where(item => ids.Contains(item.ClipId))
+            .ToDictionaryAsync(item => item.ClipId, item => (item.IsPreserved, item.Version), cancellationToken);
         var latestJobs = new Dictionary<string, ClipAnalysisJob>(StringComparer.Ordinal);
         foreach (var chunk in ids.Chunk(500))
         {
@@ -74,7 +78,8 @@ public sealed class ClipLibraryService(CaptureOptions capture, IamDbContext data
         var cameraPublicIds = allowedCameras.ToDictionary(camera => camera.CameraId, camera => camera.PublicId!,
             StringComparer.Ordinal);
         var items = ordered.Skip((page - 1) * pageSize).Take(pageSize).Select(clip => Map(clip,
-            latestJobs.GetValueOrDefault(clip.ClipId)?.State ?? "not_requested", cameraPublicIds[clip.CameraId])).ToArray();
+            latestJobs.GetValueOrDefault(clip.ClipId)?.State ?? "not_requested", cameraPublicIds[clip.CameraId],
+            preservationStates.GetValueOrDefault(clip.ClipId))).ToArray();
         return new(items, page, pageSize, ordered.Length);
     }
 
@@ -93,7 +98,10 @@ public sealed class ClipLibraryService(CaptureOptions capture, IamDbContext data
 
         var job = await database.ClipAnalysisJobs.AsNoTracking().Where(item => item.ClipId == clip.ClipId)
             .OrderByDescending(item => item.CreatedAtUtc).FirstOrDefaultAsync(cancellationToken);
-        var item = Map(clip, job?.State ?? "not_requested", camera.PublicId!);
+        var preservationState = await database.ClipPreservations.AsNoTracking().Where(item => item.ClipId == clip.ClipId)
+            .Select(item => new { item.IsPreserved, item.Version }).SingleOrDefaultAsync(cancellationToken);
+        var item = Map(clip, job?.State ?? "not_requested", camera.PublicId!,
+            (preservationState?.IsPreserved ?? false, preservationState?.Version ?? 0));
         var mediaPath = ResolveMedia(clip);
         var thumbnailPath = ResolveThumbnail(clip);
         return (new(item, mediaPath is null ? null : $"/api/v1/clips/{publicId}/media",
@@ -126,14 +134,15 @@ public sealed class ClipLibraryService(CaptureOptions capture, IamDbContext data
         catch (JsonException) { return null; }
     }
 
-    private ClipListItem Map(ClipManifestV1 clip, string analysisStatus, string cameraPublicId)
+    private ClipListItem Map(ClipManifestV1 clip, string analysisStatus, string cameraPublicId,
+        (bool IsPreserved, long Version) preservation = default)
     {
         var media = ResolveMedia(clip);
         var thumbnail = ResolveThumbnail(clip);
         long? size = media is null ? null : new FileInfo(media).Length;
         return new(clip.PublicId!, cameraPublicId, clip.EffectiveStartedAt, clip.EffectiveEndedAt, clip.State,
             clip.ArchiveStatus, analysisStatus, thumbnail is null ? null : $"/api/v1/clips/{clip.PublicId}/thumbnail",
-            size, clip.TriggerReason, clip.TriggerConfigVersion);
+            size, clip.TriggerReason, clip.TriggerConfigVersion, preservation.IsPreserved, preservation.Version);
     }
 
     private async Task<ClipManifestV1?> FindManifestByPublicIdAsync(string publicId, CancellationToken cancellationToken)

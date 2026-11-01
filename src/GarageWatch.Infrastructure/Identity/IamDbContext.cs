@@ -30,6 +30,12 @@ public sealed class IamDbContext(DbContextOptions<IamDbContext> options, IPublic
     public DbSet<AccessRequest> AccessRequests => Set<AccessRequest>();
     public DbSet<ClipAnalysisDispatchPolicy> ClipAnalysisDispatchPolicies => Set<ClipAnalysisDispatchPolicy>();
     public DbSet<ClipAnalysisJob> ClipAnalysisJobs => Set<ClipAnalysisJob>();
+    public DbSet<KnownPerson> KnownPeople => Set<KnownPerson>();
+    public DbSet<BiometricEnrollment> BiometricEnrollments => Set<BiometricEnrollment>();
+    public DbSet<FaceExtractorCandidate> FaceExtractorCandidates => Set<FaceExtractorCandidate>();
+    public DbSet<FaceExtractorSelection> FaceExtractorSelections => Set<FaceExtractorSelection>();
+    public DbSet<ClipRetentionPolicy> ClipRetentionPolicies => Set<ClipRetentionPolicy>();
+    public DbSet<ClipPreservation> ClipPreservations => Set<ClipPreservation>();
 
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {
@@ -220,6 +226,88 @@ public sealed class IamDbContext(DbContextOptions<IamDbContext> options, IPublic
             entity.HasIndex(job => new { job.ClipId, job.IdempotencyKey }).IsUnique();
             entity.HasIndex(job => new { job.State, job.CreatedAtUtc });
             ConfigurePublicId(entity, PublicIdPrefixes.ClipAnalysisJobPrefix);
+        });
+        builder.Entity<KnownPerson>(entity =>
+        {
+            entity.HasKey(person => person.Id);
+            entity.Property(person => person.DisplayName).HasMaxLength(128);
+            entity.Property(person => person.Purpose).HasMaxLength(256);
+            entity.Property(person => person.AuthorizationRecordedAtUtc).HasConversion(NullableUtcTicksConverter);
+            entity.Property(person => person.CreatedAtUtc).HasConversion(UtcTicksConverter);
+            entity.Property(person => person.DeletedAtUtc).HasConversion(NullableUtcTicksConverter);
+            entity.Property(person => person.Version).IsConcurrencyToken();
+            entity.HasIndex(person => new { person.DeletedAtUtc, person.DisplayName });
+            ConfigurePublicId(entity, PublicIdPrefixes.KnownPersonPrefix);
+        });
+        builder.Entity<BiometricEnrollment>(entity =>
+        {
+            entity.HasKey(item => item.Id);
+            entity.Property(item => item.Status).HasMaxLength(16).IsRequired();
+            entity.Property(item => item.RevokedReason).HasMaxLength(32);
+            entity.Property(item => item.KeyVersion).HasMaxLength(32).IsRequired();
+            entity.Property(item => item.ModelId).HasMaxLength(128).IsRequired();
+            entity.Property(item => item.ModelVersion).HasMaxLength(64).IsRequired();
+            entity.Property(item => item.SchemaVersion).HasMaxLength(32).IsRequired();
+            entity.Property(item => item.AdapterId).HasMaxLength(64).IsRequired();
+            entity.Property(item => item.EnrolledAtUtc).HasConversion(UtcTicksConverter);
+            entity.Property(item => item.ExpiresAtUtc).HasConversion(UtcTicksConverter);
+            entity.Property(item => item.RevokedAtUtc).HasConversion(NullableUtcTicksConverter);
+            entity.Property(item => item.CreatedAtUtc).HasConversion(UtcTicksConverter);
+            entity.HasIndex(item => item.UserId).IsUnique().HasFilter("\"Status\" = 'active'");
+            entity.HasIndex(item => new { item.Status, item.ExpiresAtUtc });
+            entity.HasOne(item => item.User).WithMany().HasForeignKey(item => item.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+            ConfigurePublicId(entity, PublicIdPrefixes.BiometricEnrollmentPrefix);
+        });
+        builder.Entity<FaceExtractorCandidate>(entity =>
+        {
+            entity.HasKey(candidate => candidate.Id);
+            entity.Property(candidate => candidate.ModelId).HasMaxLength(128).IsRequired();
+            entity.Property(candidate => candidate.ModelVersion).HasMaxLength(64).IsRequired();
+            entity.Property(candidate => candidate.ArtifactSha256).HasMaxLength(64).IsRequired();
+            entity.Property(candidate => candidate.SourceUri).HasMaxLength(512).IsRequired();
+            entity.Property(candidate => candidate.CodeLicense).HasMaxLength(128).IsRequired();
+            entity.Property(candidate => candidate.WeightsLicense).HasMaxLength(128).IsRequired();
+            entity.Property(candidate => candidate.AdapterId).HasMaxLength(64).IsRequired();
+            entity.Property(candidate => candidate.AdapterContractVersion).HasMaxLength(64).IsRequired();
+            entity.Property(candidate => candidate.CreatedAtUtc).HasConversion(UtcTicksConverter);
+            entity.HasIndex(candidate => new { candidate.ModelId, candidate.ModelVersion, candidate.ArtifactSha256 })
+                .IsUnique();
+            ConfigurePublicId(entity, PublicIdPrefixes.FaceExtractorPrefix);
+        });
+        builder.Entity<FaceExtractorSelection>(entity =>
+        {
+            entity.HasKey(selection => selection.Key);
+            entity.Property(selection => selection.Key).HasMaxLength(64).IsRequired();
+            entity.Property(selection => selection.Version).IsConcurrencyToken();
+            entity.Property(selection => selection.UpdatedAtUtc).HasConversion(UtcTicksConverter);
+            entity.HasOne<FaceExtractorCandidate>().WithMany().HasForeignKey(selection => selection.CandidateId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+        builder.Entity<ClipRetentionPolicy>(entity =>
+        {
+            entity.HasKey(policy => policy.CameraId);
+            entity.Property(policy => policy.CameraId).HasMaxLength(64).IsRequired();
+            entity.Property(policy => policy.Version).IsConcurrencyToken();
+            entity.Property(policy => policy.UpdatedByUserId).HasMaxLength(64).IsRequired();
+            entity.Property(policy => policy.CreatedAtUtc).HasConversion(UtcTicksConverter);
+            entity.Property(policy => policy.UpdatedAtUtc).HasConversion(UtcTicksConverter);
+            entity.HasOne<CameraCatalogEntry>().WithMany().HasForeignKey(policy => policy.CameraId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+        builder.Entity<ClipPreservation>(entity =>
+        {
+            entity.HasKey(preservation => preservation.ClipId);
+            entity.Property(preservation => preservation.ClipId).HasMaxLength(64).IsRequired();
+            entity.Property(preservation => preservation.PublicId).HasMaxLength(15).IsRequired();
+            entity.Property(preservation => preservation.CameraId).HasMaxLength(64).IsRequired();
+            entity.Property(preservation => preservation.Version).IsConcurrencyToken();
+            entity.Property(preservation => preservation.UpdatedByUserId).HasMaxLength(64).IsRequired();
+            entity.Property(preservation => preservation.UpdatedAtUtc).HasConversion(UtcTicksConverter);
+            entity.HasIndex(preservation => preservation.PublicId).IsUnique();
+            entity.HasIndex(preservation => new { preservation.CameraId, preservation.IsPreserved });
+            entity.HasOne<CameraCatalogEntry>().WithMany().HasForeignKey(preservation => preservation.CameraId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
     }
 

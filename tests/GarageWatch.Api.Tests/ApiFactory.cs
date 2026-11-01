@@ -1,6 +1,7 @@
 using GarageWatch.Application.Profiles;
 using GarageWatch.Domain;
 using GarageWatch.Infrastructure.Capture;
+using GarageWatch.Application.Cameras;
 using GarageWatch.Infrastructure.Identity;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -24,11 +25,14 @@ public sealed class ApiFactory : WebApplicationFactory<Program>
     private readonly string? _bootstrapPassword;
     private readonly string _environment;
     private readonly IPublicIdGenerator? _publicIdGenerator;
+    private readonly bool _useCameraCapture;
+    private readonly ICameraConnectionManager? _cameraConnectionManager;
 
     public ApiFactory(ISystemProfileSource? profileSource = null, ILoggerProvider? loggerProvider = null,
         ISegmentCaptureAdapter? captureAdapter = null, string? databasePath = null,
         string? bootstrapUsername = "contract-user", string? bootstrapPassword = "Contract-Password-123!",
-        string environment = "Testing", IPublicIdGenerator? publicIdGenerator = null)
+        string environment = "Testing", IPublicIdGenerator? publicIdGenerator = null,
+        bool useCameraCapture = false, ICameraConnectionManager? cameraConnectionManager = null)
     {
         _profileSource = profileSource;
         _loggerProvider = loggerProvider;
@@ -40,6 +44,8 @@ public sealed class ApiFactory : WebApplicationFactory<Program>
         _bootstrapPassword = bootstrapPassword;
         _environment = environment;
         _publicIdGenerator = publicIdGenerator;
+        _useCameraCapture = useCameraCapture;
+        _cameraConnectionManager = cameraConnectionManager;
     }
 
     public string DatabasePath => _databasePath;
@@ -79,6 +85,17 @@ public sealed class ApiFactory : WebApplicationFactory<Program>
             {
                 services.RemoveAll<ISegmentCaptureAdapter>();
                 services.AddSingleton(_captureAdapter);
+            }
+            if (_useCameraCapture)
+            {
+                services.RemoveAll<CaptureOptions>();
+                services.AddSingleton(new CaptureOptions("ffmpeg-rtsp", "garage-01", _captureSpoolPath,
+                    1, 4, 1_048_576, "rtsp://neolink:8554/garage/mainStream", "ffmpeg", "ffprobe", true));
+            }
+            if (_cameraConnectionManager is not null)
+            {
+                services.RemoveAll<ICameraConnectionManager>();
+                services.AddSingleton(_cameraConnectionManager);
             }
         });
     }

@@ -23,7 +23,8 @@ public sealed class ListClipsEndpoint() : BaseEndpoint("Clips", "ListClips", "Li
                     page ?? 1, pageSize ?? 25, cancellationToken);
                 var items = result.Items.Select(item => new ClipListItemResponse(item.PublicId, item.CameraId,
                     item.StartedAtUtc, item.EndedAtUtc, item.State, item.ArchiveStatus, item.AnalysisStatus,
-                    item.ThumbnailUrl, item.SizeBytes, item.TriggerReason, item.TriggerConfigVersion)).ToArray();
+                    item.ThumbnailUrl, item.SizeBytes, item.TriggerReason, item.TriggerConfigVersion,
+                    item.IsPreserved, item.PreservationVersion)).ToArray();
                 return Results.Ok(new ClipPageResponse(items, result.Page, result.PageSize, result.Total));
             }
             catch (ArgumentException) { return Results.BadRequest(new ApiErrorResponse("invalid_clip_query")); }

@@ -228,6 +228,98 @@ namespace GarageWatch.Infrastructure.Identity.Migrations
                     b.ToTable("AspNetUsers", (string)null);
                 });
 
+            modelBuilder.Entity("GarageWatch.Infrastructure.Identity.BiometricEnrollment", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("AdapterId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("CreatedAtUtc")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid>("CreatedByUserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Dimensions")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<byte[]>("EmbeddingCiphertext")
+                        .IsRequired()
+                        .HasColumnType("BLOB");
+
+                    b.Property<byte[]>("EmbeddingNonce")
+                        .IsRequired()
+                        .HasColumnType("BLOB");
+
+                    b.Property<byte[]>("EmbeddingTag")
+                        .IsRequired()
+                        .HasColumnType("BLOB");
+
+                    b.Property<long>("EnrolledAtUtc")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("ExpiresAtUtc")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("KeyVersion")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ModelId")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ModelVersion")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PublicId")
+                        .HasMaxLength(15)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long?>("RevokedAtUtc")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("RevokedReason")
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SchemaVersion")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PublicId")
+                        .IsUnique()
+                        .HasFilter("\"PublicId\" IS NOT NULL");
+
+                    b.HasIndex("UserId")
+                        .IsUnique()
+                        .HasFilter("\"Status\" = 'active'");
+
+                    b.HasIndex("Status", "ExpiresAtUtc");
+
+                    b.ToTable("BiometricEnrollments");
+                });
+
             modelBuilder.Entity("GarageWatch.Infrastructure.Identity.CameraAccessGrant", b =>
                 {
                     b.Property<Guid>("Id")
@@ -469,6 +561,173 @@ namespace GarageWatch.Infrastructure.Identity.Migrations
                     b.ToTable("ClipAnalysisJobs");
                 });
 
+            modelBuilder.Entity("GarageWatch.Infrastructure.Identity.ClipPreservation", b =>
+                {
+                    b.Property<string>("ClipId")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CameraId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("IsPreserved")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("PublicId")
+                        .IsRequired()
+                        .HasMaxLength(15)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("UpdatedAtUtc")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("UpdatedByUserId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("ClipId");
+
+                    b.HasIndex("PublicId")
+                        .IsUnique();
+
+                    b.HasIndex("CameraId", "IsPreserved");
+
+                    b.ToTable("ClipPreservations");
+                });
+
+            modelBuilder.Entity("GarageWatch.Infrastructure.Identity.ClipRetentionPolicy", b =>
+                {
+                    b.Property<string>("CameraId")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("CreatedAtUtc")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long?>("MaximumStorageBytes")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("RetentionDays")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("UpdatedAtUtc")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("UpdatedByUserId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("CameraId");
+
+                    b.ToTable("ClipRetentionPolicies");
+                });
+
+            modelBuilder.Entity("GarageWatch.Infrastructure.Identity.FaceExtractorCandidate", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("AdapterContractVersion")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("AdapterId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ArtifactSha256")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CodeLicense")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("CreatedAtUtc")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid>("CreatedByUserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ModelId")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ModelVersion")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PublicId")
+                        .HasMaxLength(15)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SourceUri")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("WeightsLicense")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PublicId")
+                        .IsUnique()
+                        .HasFilter("\"PublicId\" IS NOT NULL");
+
+                    b.HasIndex("ModelId", "ModelVersion", "ArtifactSha256")
+                        .IsUnique();
+
+                    b.ToTable("FaceExtractorCandidates");
+                });
+
+            modelBuilder.Entity("GarageWatch.Infrastructure.Identity.FaceExtractorSelection", b =>
+                {
+                    b.Property<string>("Key")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("CandidateId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("UpdatedAtUtc")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid?>("UpdatedByUserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Key");
+
+                    b.HasIndex("CandidateId");
+
+                    b.ToTable("FaceExtractorSelections");
+                });
+
             modelBuilder.Entity("GarageWatch.Infrastructure.Identity.IamAuditEvent", b =>
                 {
                     b.Property<Guid>("Id")
@@ -514,6 +773,48 @@ namespace GarageWatch.Infrastructure.Identity.Migrations
                     b.HasKey("Key");
 
                     b.ToTable("IamMigrationStates");
+                });
+
+            modelBuilder.Entity("GarageWatch.Infrastructure.Identity.KnownPerson", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<long?>("AuthorizationRecordedAtUtc")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("CreatedAtUtc")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long?>("DeletedAtUtc")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("DisplayName")
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PublicId")
+                        .HasMaxLength(15)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Purpose")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PublicId")
+                        .IsUnique()
+                        .HasFilter("\"PublicId\" IS NOT NULL");
+
+                    b.HasIndex("DeletedAtUtc", "DisplayName");
+
+                    b.ToTable("KnownPeople");
                 });
 
             modelBuilder.Entity("GarageWatch.Infrastructure.Identity.UserAccessProfileAssignment", b =>
@@ -733,6 +1034,17 @@ namespace GarageWatch.Infrastructure.Identity.Migrations
                     b.Navigation("User");
                 });
 
+            modelBuilder.Entity("GarageWatch.Infrastructure.Identity.BiometricEnrollment", b =>
+                {
+                    b.HasOne("GarageWatch.Infrastructure.Identity.ApplicationUser", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
             modelBuilder.Entity("GarageWatch.Infrastructure.Identity.CameraAccessGrant", b =>
                 {
                     b.HasOne("GarageWatch.Infrastructure.Identity.ApplicationUser", "User")
@@ -762,6 +1074,32 @@ namespace GarageWatch.Infrastructure.Identity.Migrations
                         .HasForeignKey("CameraId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+                });
+
+            modelBuilder.Entity("GarageWatch.Infrastructure.Identity.ClipPreservation", b =>
+                {
+                    b.HasOne("GarageWatch.Infrastructure.Identity.CameraCatalogEntry", null)
+                        .WithMany()
+                        .HasForeignKey("CameraId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("GarageWatch.Infrastructure.Identity.ClipRetentionPolicy", b =>
+                {
+                    b.HasOne("GarageWatch.Infrastructure.Identity.CameraCatalogEntry", null)
+                        .WithMany()
+                        .HasForeignKey("CameraId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("GarageWatch.Infrastructure.Identity.FaceExtractorSelection", b =>
+                {
+                    b.HasOne("GarageWatch.Infrastructure.Identity.FaceExtractorCandidate", null)
+                        .WithMany()
+                        .HasForeignKey("CandidateId")
+                        .OnDelete(DeleteBehavior.Restrict);
                 });
 
             modelBuilder.Entity("GarageWatch.Infrastructure.Identity.IamAuditEvent", b =>

@@ -27,9 +27,11 @@ T03-USER-ADMIN oferece listagem paginada, detalhes minimizados, atribuição de 
 
 T03-ACCESS-REQ permite que um `User` sem monitoramento envie um pedido categorizado; a API persiste e audita no SQLite, limita 3/minuto por identidade, deduplica pedidos pendentes e nunca concede acesso. O Administrator consulta pedidos em Gestão→Pedidos de acesso e pode marcá-los como analisados; a concessão de perfil/escopo ocorre separadamente em Gestão→Usuários. E-mail não está configurado (P13/P21) e o listener permanece loopback/dev-only.
 
+O serviço é publicado somente em loopback (`127.0.0.1`). O operador pode encaminhar a porta `8084` (API camera-integration) por um túnel externo; a Platform não gerencia nem valida esse túnel. Mutações same-origin aceitam Origin HTTPS somente quando sua autoridade coincide exatamente com o Host encaminhado, sem confiar em cabeçalhos forwarded. Essa proteção não autentica o túnel nem torna o perfil dev-only adequado para LAN/produção: senha mínima de 6 caracteres, ausência de MFA e chave Data Protection efêmera continuam riscos.
+
 ## API modular e documentação
 
-As 34 operações HTTP seguem Minimal APIs, cada uma em arquivo/classe própria, com registro explícito e convenções comuns em `BaseEndpoint`; não há MVC controllers. Em Development/Testing, após login de Administrator, Swagger UI está em `/docs` e OpenAPI 3 JSON em `/openapi/v1.json`, na mesma origem/porta da API. Ambas as rotas são desabilitadas em Production e exigem Administrator; consulte [`docs/api.md`](docs/api.md) para tags de domínio, tipos e restrições.
+As operações HTTP seguem Minimal APIs, cada uma em arquivo/classe própria, com registro explícito e convenções comuns em `BaseEndpoint`; não há MVC controllers. Em Development/Testing, após login de Administrator, Swagger UI está em `/docs` e OpenAPI 3 JSON em `/openapi/v1.json`, na mesma origem/porta da API. Ambas as rotas são desabilitadas em Production e exigem Administrator; consulte [`docs/api.md`](docs/api.md) para tags de domínio, tipos e restrições.
 
 ## Frontend React independente
 

@@ -73,6 +73,9 @@ public static class PublicIdPrefixes
     public const string AccessRequestPrefix = "ARQ";
     public const string ClipPrefix = "CLP";
     public const string ClipAnalysisJobPrefix = "JOB";
+    public const string KnownPersonPrefix = "PER";
+    public const string FaceExtractorPrefix = "FEX";
+    public const string BiometricEnrollmentPrefix = "BIO";
 
     public static string For(IHasPublicId entity) => entity switch
     {
@@ -84,6 +87,9 @@ public static class PublicIdPrefixes
         UserAccessProfileAssignment => ProfileAssignmentPrefix,
         AccessRequest => AccessRequestPrefix,
         ClipAnalysisJob => ClipAnalysisJobPrefix,
+        KnownPerson => KnownPersonPrefix,
+        FaceExtractorCandidate => FaceExtractorPrefix,
+        BiometricEnrollment => BiometricEnrollmentPrefix,
         _ => throw new InvalidOperationException("Namespace de ID público não registrado.")
     };
 }

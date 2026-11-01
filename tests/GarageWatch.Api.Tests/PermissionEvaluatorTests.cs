@@ -10,7 +10,7 @@ public sealed class PermissionEvaluatorTests
     [Fact]
     public void Catalog_is_finite_versioned_and_separates_delegable_capabilities()
     {
-        Assert.Equal("1.0", PermissionCatalog.Version);
+        Assert.Equal("1.1", PermissionCatalog.Version);
         Assert.Equal(PermissionCatalog.All.Count, PermissionCatalog.All.Select(entry => entry.Key)
             .Distinct(StringComparer.Ordinal).Count());
         Assert.True(PermissionCatalog.TryGet("live.video.view", out var video));
@@ -19,6 +19,8 @@ public sealed class PermissionEvaluatorTests
         Assert.False(audio.IsDelegable);
         Assert.True(PermissionCatalog.TryGet("admin.users.manage", out var admin));
         Assert.False(admin.IsDelegable);
+        Assert.True(PermissionCatalog.TryGet("biometrics.manage", out var biometrics));
+        Assert.True(biometrics.IsDelegable);
     }
 
     [Fact]
@@ -40,6 +42,7 @@ public sealed class PermissionEvaluatorTests
             new("live.video.view", Set(new PermissionScope("garage", "garage-01"),
                 new PermissionScope("other", "garage-02"))),
             new("admin.users.manage", Set(new PermissionScope("garage", "garage-01"))),
+            new("biometrics.manage", Set(new PermissionScope("garage", "garage-01"))),
             new("*", Set(new PermissionScope("*", "*")))
         ]);
 
@@ -49,6 +52,8 @@ public sealed class PermissionEvaluatorTests
         Assert.False(evaluator.IsAllowed(subject, new("live.video.view", "garage")));
         Assert.False(evaluator.IsAllowed(subject, new("admin.users.manage", "garage", "garage-01")));
         Assert.False(evaluator.IsAllowed(subject, new("future.permission", "garage", "garage-01")));
+        Assert.True(evaluator.IsAllowed(subject, new("biometrics.manage", "garage", "garage-01")));
+        Assert.False(evaluator.IsAllowed(subject, new("biometrics.manage", "other", "garage-02")));
     }
 
     [Fact]

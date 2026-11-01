@@ -2,7 +2,7 @@ namespace GarageWatch.Application.Authorization;
 
 public static class PermissionCatalog
 {
-    public const string Version = "1.0";
+    public const string Version = "1.1";
 
     private static readonly IReadOnlyDictionary<string, PermissionDefinition> Entries =
         new Dictionary<string, PermissionDefinition>(StringComparer.Ordinal)
@@ -16,6 +16,7 @@ public static class PermissionCatalog
             ["clips.export"] = new("clips.export", "Export clips", true),
             ["clips.analysis.request"] = new("clips.analysis.request", "Request clip analysis", true),
             ["clips.analysis.policy.manage"] = new("clips.analysis.policy.manage", "Manage clip analysis dispatch policy", true),
+            ["biometrics.manage"] = new("biometrics.manage", "Manage biometric enrollments of other accounts", true),
             ["admin.users.manage"] = new("admin.users.manage", "Manage accounts and access", false),
             ["admin.permissions.manage"] = new("admin.permissions.manage", "Manage permission profiles", false),
             ["admin.configuration.manage"] = new("admin.configuration.manage", "Manage privileged configuration", false),
