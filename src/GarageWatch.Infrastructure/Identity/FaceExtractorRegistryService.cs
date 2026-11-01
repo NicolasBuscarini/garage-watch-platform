@@ -12,16 +12,20 @@ public sealed record FaceExtractorCandidateSummary(string PublicId, string Model
     string ArtifactSha256, string SourceUri, string CodeLicense, string WeightsLicense, string AdapterId,
     string AdapterContractVersion, DateTimeOffset CreatedAtUtc);
 
+public sealed record FaceExtractorRuntimeInfo(bool Enabled, string State, string AdapterId, string ModelId,
+    string ModelVersion, string? DetectorSha256, string? RecognizerSha256);
+
 public sealed record FaceExtractorRegistrySnapshot(long Version, FaceExtractorCandidateSummary? SelectedCandidate,
-    IReadOnlyList<FaceExtractorCandidateSummary> Candidates, bool RuntimeEnabled, bool SampleCollectionEnabled);
+    IReadOnlyList<FaceExtractorCandidateSummary> Candidates, bool RuntimeEnabled, bool SampleCollectionEnabled,
+    FaceExtractorRuntimeInfo Runtime);
 
 public sealed record FaceExtractorSelectionResult(long Version, FaceExtractorCandidateSummary SelectedCandidate,
-    bool RuntimeEnabled, bool SampleCollectionEnabled);
+    bool RuntimeEnabled, bool SampleCollectionEnabled, FaceExtractorRuntimeInfo Runtime);
 
 public sealed class FaceExtractorConflictException(string code) : Exception(code);
 
 public sealed class FaceExtractorRegistryService(IamDbContext database, IIamUnitOfWork unitOfWork,
-    IIamAuditEventRepository auditEvents, TimeProvider timeProvider)
+    IIamAuditEventRepository auditEvents, TimeProvider timeProvider, Biometrics.FaceExtractorRuntime runtime)
 {
     public const string RegistryKey = "face-extractor";
     public const string AdapterContract = "face-embedding.v1";
@@ -38,8 +42,12 @@ public sealed class FaceExtractorRegistryService(IamDbContext database, IIamUnit
                 .SingleOrDefaultAsync(item => item.Id == id, cancellationToken)
             : null;
         return new(state?.Version ?? 0, selected is null ? null : Map(selected), candidates.Select(Map).ToArray(),
-            RuntimeEnabled: false, SampleCollectionEnabled: false);
+            RuntimeEnabled: runtime.Status.Enabled, SampleCollectionEnabled: false, Runtime());
     }
+
+    private FaceExtractorRuntimeInfo Runtime() => new(runtime.Status.Enabled, runtime.Status.State,
+        runtime.Status.AdapterId, runtime.Status.ModelId, runtime.Status.ModelVersion,
+        runtime.Status.DetectorSha256, runtime.Status.RecognizerSha256);
 
     public async Task<FaceExtractorCandidateSummary> CreateCandidateAsync(Guid actorId,
         FaceExtractorCandidateInput input, CancellationToken cancellationToken)
@@ -106,7 +114,8 @@ public sealed class FaceExtractorRegistryService(IamDbContext database, IIamUnit
                 auditEvents.Append(actorId, null, "face_extractor.selected_for_evaluation", candidate.PublicId, now);
             }
             await database.SaveChangesAsync(token);
-            return new(state!.Version, Map(candidate), RuntimeEnabled: false, SampleCollectionEnabled: false);
+            return new(state!.Version, Map(candidate), RuntimeEnabled: runtime.Status.Enabled,
+                SampleCollectionEnabled: false, Runtime());
         }, cancellationToken);
     }
 

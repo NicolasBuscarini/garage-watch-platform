@@ -66,6 +66,10 @@ public sealed class EnrollBiometricEndpoint() : BaseEndpoint("Biometrics", "Enro
             catch (ArgumentException) { return Results.BadRequest(new ApiErrorResponse("invalid_biometric_enrollment")); }
             catch (KeyNotFoundException) { return Results.NotFound(new ApiErrorResponse("biometric_enrollment_not_found")); }
             catch (UnauthorizedAccessException) { return Results.StatusCode(StatusCodes.Status403Forbidden); }
+            catch (BiometricEnrollmentRejectedException exception)
+            {
+                return Results.BadRequest(new ApiErrorResponse(exception.Code));
+            }
             catch (BiometricEnrollmentConflictException)
             {
                 return Results.Conflict(new ApiErrorResponse("biometric_enrollment_conflict"));

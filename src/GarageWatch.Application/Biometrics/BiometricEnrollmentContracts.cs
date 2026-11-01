@@ -25,6 +25,12 @@ public interface IBiometricDataProtector
     ProtectedBiometricEmbedding Protect(ReadOnlySpan<byte> embeddingFloats);
 }
 
+/// <summary>Extraction rejected the submitted image for a reason the caller can fix.</summary>
+public sealed class FaceExtractionException(string code) : Exception(code)
+{
+    public string Code { get; } = code;
+}
+
 /// <summary>Substitutable boundary for detecting/aligning a face and producing an embedding from an uploaded image.</summary>
 public interface IFaceEnrollmentExtractor
 {

@@ -3,6 +3,7 @@ using GarageWatch.Application.Identity;
 using GarageWatch.Application.Cameras;
 using GarageWatch.Application.Authorization;
 using GarageWatch.Application.Biometrics;
+using GarageWatch.Infrastructure.Biometrics;
 using GarageWatch.Infrastructure.Capture;
 using GarageWatch.Infrastructure.Identity;
 using GarageWatch.Infrastructure.Identity.Repositories;
@@ -94,6 +95,7 @@ public static class DependencyInjection
         var eventOptions = EventEngineOptions.FromConfiguration(configuration, captureOptions);
         var clipArchiveOptions = ClipArchiveOptions.FromConfiguration(configuration, captureOptions);
         var clipPlaybackOptions = ClipPlaybackOptions.FromEnvironment(configuration, captureOptions);
+        var faceExtractorOptions = FaceExtractorOptions.FromEnvironment(configuration);
         services.AddSingleton(captureOptions);
         services.AddSingleton(triggerOptions);
         services.AddSingleton(clipAnalysisOptions);
@@ -101,6 +103,9 @@ public static class DependencyInjection
         services.AddSingleton(eventOptions);
         services.AddSingleton(clipArchiveOptions);
         services.AddSingleton(clipPlaybackOptions);
+        services.AddSingleton(faceExtractorOptions);
+        services.AddSingleton<FaceExtractorRuntime>();
+        services.AddSingleton<IFaceEnrollmentExtractor, OnnxFaceEnrollmentExtractor>();
         services.AddSingleton<VersionedEventRuleEngine>();
         services.AddSingleton<LocalEventJournal>();
         services.AddSingleton<LocalSegmentSpool>();

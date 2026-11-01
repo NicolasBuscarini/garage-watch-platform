@@ -21,6 +21,12 @@ public sealed class BiometricEnrollmentConflictException(string code) : Exceptio
 /// <summary>The account did not accept the current consent text.</summary>
 public sealed class BiometricConsentRequiredException() : Exception("biometric_consent_required");
 
+/// <summary>The submitted image cannot be enrolled (no face, several faces, unreadable file).</summary>
+public sealed class BiometricEnrollmentRejectedException(string code) : Exception(code)
+{
+    public string Code { get; } = code;
+}
+
 public sealed class BiometricEnrollmentService(IamDbContext database, IIamUnitOfWork unitOfWork,
     IIamAuditEventRepository audit, AccessProfileService profiles, IBiometricDataProtector protector,
     IEnumerable<IFaceEnrollmentExtractor> extractors, TimeProvider timeProvider, IPublicIdGenerator publicIds)
@@ -61,6 +67,12 @@ public sealed class BiometricEnrollmentService(IamDbContext database, IIamUnitOf
         catch (OperationCanceledException)
         {
             throw;
+        }
+        catch (FaceExtractionException exception)
+        {
+            if (exception.Code == "face_extractor_not_configured")
+                throw new BiometricEnrollmentUnavailableException("face_extractor_not_configured");
+            throw new BiometricEnrollmentRejectedException(exception.Code);
         }
         catch (Exception)
         {
