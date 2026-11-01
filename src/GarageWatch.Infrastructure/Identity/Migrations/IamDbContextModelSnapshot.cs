@@ -239,6 +239,13 @@ namespace GarageWatch.Infrastructure.Identity.Migrations
                         .HasMaxLength(64)
                         .HasColumnType("TEXT");
 
+                    b.Property<DateTimeOffset>("ConsentAcceptedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ConsentVersion")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
                     b.Property<long>("CreatedAtUtc")
                         .HasColumnType("INTEGER");
 

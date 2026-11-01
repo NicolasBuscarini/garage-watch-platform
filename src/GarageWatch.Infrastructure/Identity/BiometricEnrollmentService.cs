@@ -9,13 +9,17 @@ namespace GarageWatch.Infrastructure.Identity;
 
 public sealed record BiometricEnrollmentSummary(string PublicId, string UserPublicId, string Status,
     DateTimeOffset EnrolledAtUtc, DateTimeOffset ExpiresAtUtc, DateTimeOffset? RevokedAtUtc, string RevokedReason,
-    string ModelId, string ModelVersion, int Dimensions, string KeyVersion);
+    string ModelId, string ModelVersion, int Dimensions, string KeyVersion, string ConsentVersion,
+    DateTimeOffset ConsentAcceptedAtUtc);
 
 /// <summary>Enrollment cannot run because no extractor/keys are configured or extraction failed.</summary>
 public sealed class BiometricEnrollmentUnavailableException(string code) : Exception(code);
 
 /// <summary>Concurrent enrollment for the same account.</summary>
 public sealed class BiometricEnrollmentConflictException(string code) : Exception(code);
+
+/// <summary>The account did not accept the current consent text.</summary>
+public sealed class BiometricConsentRequiredException() : Exception("biometric_consent_required");
 
 public sealed class BiometricEnrollmentService(IamDbContext database, IIamUnitOfWork unitOfWork,
     IIamAuditEventRepository audit, AccessProfileService profiles, IBiometricDataProtector protector,
@@ -37,9 +41,11 @@ public sealed class BiometricEnrollmentService(IamDbContext database, IIamUnitOf
     }
 
     public async Task<BiometricEnrollmentSummary> EnrollAsync(Guid actorId, string? userPublicId, FaceCropV1 crop,
-        CancellationToken cancellationToken)
+        string? consentVersion, CancellationToken cancellationToken)
     {
         if (!crop.IsValid) throw new ArgumentException("Recorte facial inválido.");
+        if (!string.Equals(consentVersion, BiometricPolicy.ConsentVersion, StringComparison.Ordinal))
+            throw new BiometricConsentRequiredException();
         var extractor = extractors.FirstOrDefault()
             ?? throw new BiometricEnrollmentUnavailableException("face_extractor_not_configured");
         if (!protector.IsConfigured)
@@ -96,6 +102,8 @@ public sealed class BiometricEnrollmentService(IamDbContext database, IIamUnitOf
                     ModelVersion = embedding.ModelVersion,
                     SchemaVersion = embedding.SchemaVersion,
                     AdapterId = extractor.AdapterId,
+                    ConsentVersion = BiometricPolicy.ConsentVersion,
+                    ConsentAcceptedAtUtc = now,
                     CreatedByUserId = actorId,
                     CreatedAtUtc = now
                 };
@@ -191,5 +199,6 @@ public sealed class BiometricEnrollmentService(IamDbContext database, IIamUnitOf
 
     private static BiometricEnrollmentSummary Map(BiometricEnrollment item, string userPublicId) =>
         new(item.PublicId!, userPublicId, item.Status, item.EnrolledAtUtc, item.ExpiresAtUtc, item.RevokedAtUtc,
-            item.RevokedReason ?? string.Empty, item.ModelId, item.ModelVersion, item.Dimensions, item.KeyVersion);
+            item.RevokedReason ?? string.Empty, item.ModelId, item.ModelVersion, item.Dimensions, item.KeyVersion,
+            item.ConsentVersion, item.ConsentAcceptedAtUtc);
 }

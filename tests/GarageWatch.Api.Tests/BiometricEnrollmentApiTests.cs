@@ -45,6 +45,8 @@ public sealed class BiometricEnrollmentApiTests
         var enrolledAt = enrollment.GetProperty("enrolledAtUtc").GetDateTimeOffset();
         var expiresAt = enrollment.GetProperty("expiresAtUtc").GetDateTimeOffset();
         Assert.Equal(BiometricPolicy.RetentionDays, (expiresAt - enrolledAt).TotalDays, 3);
+        Assert.Equal(BiometricPolicy.ConsentVersion, enrollment.GetProperty("consentVersion").GetString());
+        Assert.Equal(enrolledAt, enrollment.GetProperty("consentAcceptedAtUtc").GetDateTimeOffset());
 
         using (var scope = factory.Services.CreateScope())
         {
@@ -55,6 +57,8 @@ public sealed class BiometricEnrollmentApiTests
             Assert.Equal(12, stored.EmbeddingNonce.Length);
             Assert.Equal(16, stored.EmbeddingTag.Length);
             Assert.Equal("test-1", stored.KeyVersion);
+            Assert.Equal(BiometricPolicy.ConsentVersion, stored.ConsentVersion);
+            Assert.Equal(enrolledAt, stored.ConsentAcceptedAtUtc);
             Assert.Equal(enrolledAt, stored.EnrolledAtUtc);
             Assert.Equal(expiresAt, stored.ExpiresAtUtc);
         }
@@ -164,6 +168,37 @@ public sealed class BiometricEnrollmentApiTests
     }
 
     [Fact]
+    public async Task Enrollment_requires_the_current_consent_version_and_persists_nothing_otherwise()
+    {
+        await using var factory = ConfiguredFactory();
+        using var client = factory.CreateClient();
+        await RegisterAsync(client, "bio-consent");
+        await LoginAsync(client, "bio-consent");
+
+        using var missing = await client.PostAsJsonAsync("/api/v1/biometrics/enrollments",
+            EnrollmentBody() with { ConsentVersion = null });
+        Assert.Equal(HttpStatusCode.BadRequest, missing.StatusCode);
+        Assert.Contains("biometric_consent_required", await missing.Content.ReadAsStringAsync());
+
+        using var outdated = await client.PostAsJsonAsync("/api/v1/biometrics/enrollments",
+            EnrollmentBody() with { ConsentVersion = "biometric-consent.v0" });
+        Assert.Equal(HttpStatusCode.BadRequest, outdated.StatusCode);
+        Assert.Contains("biometric_consent_required", await outdated.Content.ReadAsStringAsync());
+
+        using (var scope = factory.Services.CreateScope())
+            Assert.Equal(0, await scope.ServiceProvider.GetRequiredService<IamDbContext>().BiometricEnrollments.CountAsync());
+
+        using var accepted = await client.PostAsJsonAsync("/api/v1/biometrics/enrollments", EnrollmentBody());
+        Assert.Equal(HttpStatusCode.Created, accepted.StatusCode);
+        using (var scope = factory.Services.CreateScope())
+        {
+            var stored = await scope.ServiceProvider.GetRequiredService<IamDbContext>().BiometricEnrollments
+                .SingleAsync();
+            Assert.Equal(BiometricPolicy.ConsentVersion, stored.ConsentVersion);
+        }
+    }
+
+    [Fact]
     public async Task Expired_enrollment_is_erased_by_durable_retention()
     {
         await using var factory = ConfiguredFactory();
@@ -247,7 +282,8 @@ public sealed class BiometricEnrollmentApiTests
                 });
         });
 
-    private sealed record EnrollmentRequest(string? UserPublicId, string MediaType, int Width, int Height, string ImageBase64);
+    private sealed record EnrollmentRequest(string? UserPublicId, string MediaType, int Width, int Height,
+        string ImageBase64, string? ConsentVersion = BiometricPolicy.ConsentVersion);
 
     private static EnrollmentRequest EnrollmentBody() => new(null, "image/jpeg", 160, 160,
         Convert.ToBase64String(Encoding.UTF8.GetBytes("synthetic-face-image")));

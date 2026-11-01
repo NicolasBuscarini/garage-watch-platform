@@ -2,6 +2,7 @@ using System.Security.Claims;
 using GarageWatch.Api.Contracts;
 using GarageWatch.Api.Errors;
 using GarageWatch.Application.Analysis;
+using GarageWatch.Application.Biometrics;
 using GarageWatch.Infrastructure.Identity;
 using Microsoft.AspNetCore.Identity;
 
@@ -31,7 +32,8 @@ public sealed class ListBiometricEnrollmentsEndpoint() : BaseEndpoint("Biometric
 
     internal static BiometricEnrollmentResponse Map(BiometricEnrollmentSummary item) => new(item.PublicId,
         item.UserPublicId, item.Status, item.EnrolledAtUtc, item.ExpiresAtUtc, item.RevokedAtUtc, item.RevokedReason,
-        item.ModelId, item.ModelVersion, item.Dimensions, item.KeyVersion);
+        item.ModelId, item.ModelVersion, item.Dimensions, item.KeyVersion, item.ConsentVersion,
+        item.ConsentAcceptedAtUtc);
 }
 
 public sealed class EnrollBiometricEndpoint() : BaseEndpoint("Biometrics", "EnrollBiometric",
@@ -45,6 +47,8 @@ public sealed class EnrollBiometricEndpoint() : BaseEndpoint("Biometrics", "Enro
             if (!EndpointSecurity.IsSameOrigin(context)) return Results.StatusCode(StatusCodes.Status403Forbidden);
             var actor = await users.GetUserAsync(principal);
             if (actor is null) return Results.Unauthorized();
+            if (!string.Equals(request.ConsentVersion, BiometricPolicy.ConsentVersion, StringComparison.Ordinal))
+                return Results.BadRequest(new ApiErrorResponse("biometric_consent_required"));
             FaceCropV1 crop;
             try
             {
@@ -54,7 +58,8 @@ public sealed class EnrollBiometricEndpoint() : BaseEndpoint("Biometrics", "Enro
             if (!crop.IsValid) return Results.BadRequest(new ApiErrorResponse("invalid_biometric_image"));
             try
             {
-                var created = await enrollments.EnrollAsync(actor.Id, request.UserPublicId, crop, cancellationToken);
+                var created = await enrollments.EnrollAsync(actor.Id, request.UserPublicId, crop, request.ConsentVersion,
+                    cancellationToken);
                 return Results.Created($"/api/v1/biometrics/enrollments/{created.PublicId}",
                     ListBiometricEnrollmentsEndpoint.Map(created));
             }

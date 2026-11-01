@@ -28,6 +28,8 @@ public sealed class BiometricEnrollment : IHasPublicId
     public string ModelVersion { get; set; } = string.Empty;
     public string SchemaVersion { get; set; } = string.Empty;
     public string AdapterId { get; set; } = string.Empty;
+    public string ConsentVersion { get; set; } = string.Empty;
+    public DateTimeOffset ConsentAcceptedAtUtc { get; set; }
     public Guid CreatedByUserId { get; set; }
     public DateTimeOffset CreatedAtUtc { get; set; }
 }
