@@ -47,10 +47,13 @@ public sealed class ClipLibraryApiTests
         Assert.Equal(HttpStatusCode.OK, detail.StatusCode);
         using var thumbnail = await admin.GetAsync($"/api/v1/clips/{clip.PublicId}/thumbnail");
         Assert.Equal(HttpStatusCode.OK, thumbnail.StatusCode);
-        admin.DefaultRequestHeaders.Range = new System.Net.Http.Headers.RangeHeaderValue(0, 1);
+        admin.DefaultRequestHeaders.Range = new System.Net.Http.Headers.RangeHeaderValue(0, 63);
         using var media = await admin.GetAsync($"/api/v1/clips/{clip.PublicId}/media");
         Assert.Equal(HttpStatusCode.PartialContent, media.StatusCode);
-        Assert.Equal(new byte[] { 0x47, 0x01 }, await media.Content.ReadAsByteArrayAsync());
+        Assert.Equal("video/mp4", media.Content.Headers.ContentType?.MediaType);
+        var head = await media.Content.ReadAsByteArrayAsync();
+        Assert.True(head.Length >= 12);
+        Assert.Equal("ftyp", System.Text.Encoding.ASCII.GetString(head, 4, 4));
 
         using var corrupt = await admin.GetAsync($"/api/v1/clips/{clip.PublicId}/media");
         Assert.Equal(HttpStatusCode.PartialContent, corrupt.StatusCode); // The original remains intact.
@@ -121,7 +124,7 @@ public sealed class ClipLibraryApiTests
         Directory.CreateDirectory(manifests);
         var mediaName = id + ".ts";
         var thumbnailName = id + ".jpg";
-        await File.WriteAllBytesAsync(Path.Combine(mediaDir, mediaName), [0x47, 0x01, 0x02, 0x03]);
+        await RunFfmpegAsync(Path.Combine(mediaDir, mediaName));
         await File.WriteAllBytesAsync(Path.Combine(thumbsDir, thumbnailName), [0xff, 0xd8, 0xff, 0xd9]);
         var mediaHash = await HashAsync(Path.Combine(mediaDir, mediaName));
         var thumbnailHash = await HashAsync(Path.Combine(thumbsDir, thumbnailName));
@@ -131,6 +134,26 @@ public sealed class ClipLibraryApiTests
         await File.WriteAllTextAsync(Path.Combine(manifests, id + ".json"),
             JsonSerializer.Serialize(clip, new JsonSerializerOptions(JsonSerializerDefaults.Web)));
         return clip;
+    }
+
+    private static async Task RunFfmpegAsync(string destination)
+    {
+        var start = new System.Diagnostics.ProcessStartInfo("ffmpeg")
+        {
+            UseShellExecute = false,
+            RedirectStandardError = true,
+            RedirectStandardOutput = true,
+            CreateNoWindow = true
+        };
+        foreach (var argument in new[] { "-nostdin", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i",
+                     "color=c=black:s=32x24:r=5", "-t", "1", "-c:v", "libx264", "-preset", "ultrafast", "-threads", "1",
+                     "-pix_fmt", "yuv420p", "-f", "mpegts", destination })
+            start.ArgumentList.Add(argument);
+        using var process = System.Diagnostics.Process.Start(start) ?? throw new InvalidOperationException("ffmpeg_start_failed");
+        var stderr = process.StandardError.ReadToEndAsync();
+        await process.WaitForExitAsync();
+        var error = await stderr;
+        Assert.True(process.ExitCode == 0, error);
     }
 
     private static async Task<string> HashAsync(string path)

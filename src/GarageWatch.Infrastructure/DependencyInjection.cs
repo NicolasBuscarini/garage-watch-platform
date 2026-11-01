@@ -93,12 +93,14 @@ public static class DependencyInjection
         var detectorOptions = OnnxDetectorOptions.FromConfiguration(configuration);
         var eventOptions = EventEngineOptions.FromConfiguration(configuration, captureOptions);
         var clipArchiveOptions = ClipArchiveOptions.FromConfiguration(configuration, captureOptions);
+        var clipPlaybackOptions = ClipPlaybackOptions.FromEnvironment(configuration, captureOptions);
         services.AddSingleton(captureOptions);
         services.AddSingleton(triggerOptions);
         services.AddSingleton(clipAnalysisOptions);
         services.AddSingleton(detectorOptions);
         services.AddSingleton(eventOptions);
         services.AddSingleton(clipArchiveOptions);
+        services.AddSingleton(clipPlaybackOptions);
         services.AddSingleton<VersionedEventRuleEngine>();
         services.AddSingleton<LocalEventJournal>();
         services.AddSingleton<LocalSegmentSpool>();
@@ -111,6 +113,7 @@ public static class DependencyInjection
         services.AddSingleton<DetectionProcessor>();
         services.AddSingleton<ObjectDetectionWorker>();
         services.AddSingleton<IClipMediaAssembler, LocalClipMediaAssembler>();
+        services.AddSingleton<ClipPlaybackCache>();
         services.AddSingleton<IClipArchiveAdapter, LocalFilesystemClipArchiveAdapter>();
         services.AddSingleton<ClipArchiveWorker>();
         services.AddSingleton<ClipRetentionWorker>();
