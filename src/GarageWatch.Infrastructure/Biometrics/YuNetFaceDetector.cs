@@ -21,6 +21,8 @@ public sealed class YuNetFaceDetector : IDisposable
     private static readonly int[] Strides = [8, 16, 32];
     private readonly FaceExtractorOptions _options;
     private readonly InferenceSession _session;
+    private readonly int _fixedWidth;
+    private readonly int _fixedHeight;
 
     public YuNetFaceDetector(FaceExtractorOptions options)
     {
@@ -32,6 +34,11 @@ public sealed class YuNetFaceDetector : IDisposable
             ExecutionMode = ExecutionMode.ORT_SEQUENTIAL
         };
         _session = new InferenceSession(options.DetectorModelPath!, sessionOptions);
+        // The published YuNet 2023mar graph declares a fixed square input; only dynamic graphs use the
+        // configurable maximum size.
+        var dimensions = _session.InputMetadata.TryGetValue("input", out var metadata) ? metadata.Dimensions : null;
+        _fixedHeight = dimensions is { Length: 4 } && dimensions[2] > 0 ? dimensions[2] : 0;
+        _fixedWidth = dimensions is { Length: 4 } && dimensions[3] > 0 ? dimensions[3] : 0;
         foreach (var name in OutputNames())
             if (!_session.OutputMetadata.ContainsKey(name))
                 throw new InvalidOperationException("face_detector_outputs_incompatible");
@@ -39,9 +46,18 @@ public sealed class YuNetFaceDetector : IDisposable
 
     public IReadOnlyList<DetectedFace> Detect(RgbImage image)
     {
-        var scale = Math.Min(1f, (float)_options.MaximumInputSize / Math.Max(image.Width, image.Height));
-        var width = Math.Max(32, (int)(image.Width * scale) / 32 * 32);
-        var height = Math.Max(32, (int)(image.Height * scale) / 32 * 32);
+        int width, height;
+        if (_fixedWidth > 0 && _fixedHeight > 0)
+        {
+            width = _fixedWidth;
+            height = _fixedHeight;
+        }
+        else
+        {
+            var scale = Math.Min(1f, (float)_options.MaximumInputSize / Math.Max(image.Width, image.Height));
+            width = Math.Max(32, (int)(image.Width * scale) / 32 * 32);
+            height = Math.Max(32, (int)(image.Height * scale) / 32 * 32);
+        }
         var scaleX = (float)width / image.Width;
         var scaleY = (float)height / image.Height;
         var input = Resize(image, width, height);

@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using System.Buffers.Binary;
 using GarageWatch.Application.Analysis;
 using GarageWatch.Application.Biometrics;
@@ -29,7 +30,8 @@ public sealed class BiometricEnrollmentRejectedException(string code) : Exceptio
 
 public sealed class BiometricEnrollmentService(IamDbContext database, IIamUnitOfWork unitOfWork,
     IIamAuditEventRepository audit, AccessProfileService profiles, IBiometricDataProtector protector,
-    IEnumerable<IFaceEnrollmentExtractor> extractors, TimeProvider timeProvider, IPublicIdGenerator publicIds)
+    IEnumerable<IFaceEnrollmentExtractor> extractors, TimeProvider timeProvider, IPublicIdGenerator publicIds,
+    ILogger<BiometricEnrollmentService> logger)
 {
     public const string ManagePermission = "biometrics.manage";
     private const int ExpiryBatch = 100;
@@ -74,8 +76,9 @@ public sealed class BiometricEnrollmentService(IamDbContext database, IIamUnitOf
                 throw new BiometricEnrollmentUnavailableException("face_extractor_not_configured");
             throw new BiometricEnrollmentRejectedException(exception.Code);
         }
-        catch (Exception)
+        catch (Exception exception)
         {
+            logger.LogWarning("Falha inesperada na extração facial; tipo={ExceptionType}", exception.GetType().Name);
             throw new BiometricEnrollmentUnavailableException("face_extraction_failed");
         }
         if (!embedding.IsValid) throw new ArgumentException("Embedding facial inválido.");

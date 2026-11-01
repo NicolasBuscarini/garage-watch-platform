@@ -1,0 +1,1 @@
+Pasta mantida no repositório porque o manifesto de static web assets gerado por `dotnet build`/testes exige que o webroot exista.

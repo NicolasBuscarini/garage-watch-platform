@@ -10,6 +10,7 @@ namespace GarageWatch.Api.Tests;
 public sealed class FaceExtractorAdapterTests
 {
     private const int ImageSize = 64;
+    private const int ModelInputSize = 128;
 
     [Fact]
     public async Task Extract_enrolls_the_detected_face_into_a_128_dimension_embedding()
@@ -141,7 +142,7 @@ public sealed class FaceExtractorAdapterTests
         private readonly string _directory;
         public OnnxFaceEnrollmentExtractor Extractor { get; }
 
-        public FixtureScope(FaceScore score, int faces, int minimumPixels = 16)
+        public FixtureScope(FaceScore score, int faces, int minimumPixels = 8)
         {
             _directory = Path.Combine(Path.GetTempPath(), $"garagewatch-face-{Guid.NewGuid():N}");
             Directory.CreateDirectory(_directory);
@@ -168,9 +169,9 @@ public sealed class FaceExtractorAdapterTests
         {
             var cells = new Dictionary<int, int>
             {
-                [8] = (ImageSize / 8) * (ImageSize / 8),
-                [16] = (ImageSize / 16) * (ImageSize / 16),
-                [32] = (ImageSize / 32) * (ImageSize / 32)
+                [8] = (ModelInputSize / 8) * (ModelInputSize / 8),
+                [16] = (ModelInputSize / 16) * (ModelInputSize / 16),
+                [32] = (ModelInputSize / 32) * (ModelInputSize / 32)
             };
             var outputs = new List<(string, int[], float[])>();
             foreach (var (stride, count) in cells)
@@ -184,7 +185,7 @@ public sealed class FaceExtractorAdapterTests
                     (int Row, int Column)[] cells8 = faces == 2 ? [(2, 2), (6, 6)] : [(2, 2)];
                     foreach (var (row, column) in cells8)
                     {
-                        var index = row * (ImageSize / 8) + column;
+                        var index = row * (ModelInputSize / 8) + column;
                         var centerX = column * stride;
                         var centerY = row * stride;
                         cls[index] = 1f;
@@ -206,7 +207,9 @@ public sealed class FaceExtractorAdapterTests
                 outputs.Add(($"bbox_{stride}", [1, count, 4], bbox));
                 outputs.Add(($"kps_{stride}", [1, count, 10], kps));
             }
-            return OnnxFixture.CreateModel([("input", [1, 3, ImageSize, ImageSize])], outputs.ToArray());
+            // Fixed square input like the published YuNet 2023mar graph: the adapter must resize the
+            // uploaded image to the declared size instead of inventing dynamic dimensions.
+            return OnnxFixture.CreateModel([("input", [1, 3, ModelInputSize, ModelInputSize])], outputs.ToArray());
         }
 
         private static string Sha256(string path)
